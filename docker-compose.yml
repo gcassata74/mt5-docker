@@ -1,0 +1,22 @@
+services:
+  mt5:
+    build:
+      context: .
+      dockerfile: mt5/Dockerfile
+    ports:
+      - "1234:1234"
+      - "8000:8080"
+    cpus: 3.0
+    mem_limit: 4g
+    shm_size: 1g
+    environment:
+      - VNC_RESOLUTION=1280x720
+      - VNC_COL_DEPTH=16
+    volumes:
+      - mt5_config:/config
+      - ./mt5/home:/home
+      - "./mt5/experts:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Downloads"
+      - "./mt5/indicators:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Downloads"
+
+volumes:
+  mt5_config:
