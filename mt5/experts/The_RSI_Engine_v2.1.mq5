@@ -326,11 +326,8 @@ bool CheckBullishDivergence()
 
     if (recentLowPrice < previousLowPrice && rsiAtRecentLow > rsiAtPreviousLow)
     {
-        if (rsiAtPreviousLow < InpRSI_Oversold + 5)
-        {
             Print("Bullish Divergence Detected: Price Lows at bars ", previousLowIndex, " and ", recentLowIndex);
             return true;
-        }
     }
     return false;
 }
@@ -362,11 +359,8 @@ bool CheckBearishDivergence()
 
     if (recentHighPrice > previousHighPrice && rsiAtRecentHigh < rsiAtPreviousHigh)
     {
-        if (rsiAtPreviousHigh > InpRSI_Overbought - 5)
-        {
             Print("Bearish Divergence Detected: Price Highs at bars ", previousHighIndex, " and ", recentHighIndex);
             return true;
-        }
     }
     return false;
 }
