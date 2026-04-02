@@ -1,7 +1,7 @@
 ; GBPUSD M5 - RSI Divergence Focus (optimized TP/SL preset)
-InpUseRiskManagement=true
+InpUseRiskManagement=false
 InpRiskPercent=3.0
-InpLots=0.1
+InpLots=1
 InpStopLossPoints=100
 InpTakeProfitPoints=140
 InpMagicNumber=190220
