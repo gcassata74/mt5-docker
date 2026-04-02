@@ -23,6 +23,7 @@ input double InpLots               = 0.1;      // Fixed Lot size (if risk manage
 input int    InpStopLossPoints     = 300;      // Stop Loss in points (REQUIRED for risk management)
 input int    InpTakeProfitPoints   = 300;      // Take Profit in points
 input ulong  InpMagicNumber        = 1901;    // Unique ID for EA's trades
+input int    InpMaxSpreadPoints   = 30;
 
 //--- Trailing Stop Group
 input group "Trailing Stop"
@@ -139,26 +140,34 @@ void OnTick()
 {
     // --- Section for tasks that run on EVERY tick ---
     ManageSessionEnd();
-    ManageTrailingStop(); // New trailing stop logic
+    ManageTrailingStop(); // trailing stop logic (runs even if spread is high)
 
     // --- Section for tasks that run ONCE PER BAR ---
     static datetime lastBarTime = 0;
-    datetime currentTime = iTime(_Symbol, _Period, 0);
-    if(lastBarTime == currentTime)
-    {
-        return; // Not a new bar, so exit
-    }
-    lastBarTime = currentTime; // It's a new bar, update the time
+    datetime currentBarTime = iTime(_Symbol, _Period, 0);
+    if(lastBarTime == currentBarTime)
+        return; // Not a new bar
+    lastBarTime = currentBarTime; // New bar
 
     // --- New bar logic continues here ---
+
+    // If a position is open, manage it regardless of spread
     if(IsPositionOpen())
     {
-        ManageOpenTrades(); // Manages RSI-based exits
+        ManageOpenTrades(); // RSI exits, etc.
+        return;
     }
-    else
+
+    // --- Spread filter applies ONLY to new entries ---
+    double spreadPoints = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
+    if(spreadPoints > InpMaxSpreadPoints)
     {
-        CheckForEntrySignals(); // Looks for new trade opportunities
+        PrintFormat("Entry blocked: spread too high (%.1f points > %d)", spreadPoints, InpMaxSpreadPoints);
+        return;
     }
+
+    // --- Entry signals ---
+    CheckForEntrySignals();
 }
 
 //+------------------------------------------------------------------+
