@@ -5,11 +5,14 @@ ENV WINEPREFIX=/config/.wine
 ENV WINEDEBUG=-all
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor xvfb wget winbind ca-certificates \
+  supervisor xvfb wget winbind ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # Persisted wine prefix
 RUN mkdir -p /config/.wine
+
+# Create presets directory
+RUN mkdir -p /home/presets
 
 COPY ./mt5/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 

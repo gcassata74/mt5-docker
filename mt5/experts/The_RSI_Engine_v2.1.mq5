@@ -42,9 +42,12 @@ input int    InpRSI_Centerline     = 50;       // Centerline level
 input group "Strategy Signals & Exits"
 input bool   InpUse_Divergence_Signal         = true;     // Use RSI Divergence as a primary signal
 input bool   InpUse_OverboughtOversold_Reversal = true; // Use Overbought/Oversold reversal as a primary signal
-input bool   InpUse_Centerline_Confirmation = true;    // Wait for RSI to cross 50 for entry confirmation
+input bool   InpUse_Centerline_Confirmation = false;    // Wait for RSI to cross 50 for entry confirmation
 input bool   InpUse_RSI_Level_Exit        = false;     // Exit trades when RSI reaches opposite extreme
 input int    InpDivergence_Lookback_Bars    = 60;       // How many bars to look back for divergence
+input bool   InpRequire_Slope_Divergence   = false;      // Require opposite price/RSI slopes for entries
+input int    InpSlope_Lookback_Bars        = 50;        // Slope lookback bars (linear regression)
+input bool   InpVerboseEntryLogs           = true;      // Print detailed entry-block reasons
 
 //--- Daily Limits Group
 input group "Daily Limits (in Deposit Currency)"
@@ -176,9 +179,21 @@ void OnTick()
 void CheckForEntrySignals()
 {
     // --- Run all filters before checking for trade signals ---
-    if(IsDailyLimitReached()) return;
-    if(!IsWithinTradingHours()) return;
-    if(IsNewsTimeRestricted()) return;
+    if(IsDailyLimitReached())
+    {
+        if(InpVerboseEntryLogs) Print("Entry blocked: daily limit reached.");
+        return;
+    }
+    if(!IsWithinTradingHours())
+    {
+        if(InpVerboseEntryLogs) Print("Entry blocked: outside configured trading hours.");
+        return;
+    }
+    if(IsNewsTimeRestricted())
+    {
+        if(InpVerboseEntryLogs) Print("Entry blocked: inside news filter window.");
+        return;
+    }
 
     bool bullishSignal = false;
     bool bearishSignal = false;
@@ -189,12 +204,23 @@ void CheckForEntrySignals()
     bool bullishReversal = InpUse_OverboughtOversold_Reversal ? (GetRSI(2) < InpRSI_Oversold && GetRSI(1) > InpRSI_Oversold) : false;
     bool bearishReversal = InpUse_OverboughtOversold_Reversal ? (GetRSI(2) > InpRSI_Overbought && GetRSI(1) < InpRSI_Overbought) : false;
 
+    if(!bullishDivergence && !bearishDivergence && !bullishReversal && !bearishReversal)
+    {
+        if(InpVerboseEntryLogs)
+        {
+            PrintFormat("No raw signal on this bar: RSI(2)=%.2f RSI(1)=%.2f", GetRSI(2), GetRSI(1));
+        }
+        return;
+    }
+
     if (bullishDivergence || bullishReversal)
     {
         if (InpUse_Centerline_Confirmation)
         {
             if (GetRSI(2) < InpRSI_Centerline && GetRSI(1) > InpRSI_Centerline)
                 bullishSignal = true;
+            else if(InpVerboseEntryLogs)
+                Print("Bullish setup blocked: centerline confirmation not met.");
         }
         else
         {
@@ -208,11 +234,41 @@ void CheckForEntrySignals()
         {
             if (GetRSI(2) > InpRSI_Centerline && GetRSI(1) < InpRSI_Centerline)
                 bearishSignal = true;
+            else if(InpVerboseEntryLogs)
+                Print("Bearish setup blocked: centerline confirmation not met.");
         }
         else
         {
             bearishSignal = true;
         }
+    }
+
+    if(InpRequire_Slope_Divergence)
+    {
+        bool bullishSlopeDivergence = false;
+        bool bearishSlopeDivergence = false;
+        double priceSlope = 0.0;
+        double rsiSlope = 0.0;
+        if(!EvaluateSlopeDivergence(bullishSlopeDivergence, bearishSlopeDivergence, priceSlope, rsiSlope))
+        {
+            Print("Entry blocked: unable to evaluate slope divergence.");
+            return;
+        }
+
+        if(!bullishSlopeDivergence) bullishSignal = false;
+        if(!bearishSlopeDivergence) bearishSignal = false;
+
+        if(!bullishSignal && !bearishSignal)
+        {
+            PrintFormat("Entry blocked by slope filter: priceSlope=%.8f, rsiSlope=%.8f", priceSlope, rsiSlope);
+            return;
+        }
+    }
+
+    if(!bullishSignal && !bearishSignal)
+    {
+        if(InpVerboseEntryLogs) Print("Entry blocked: setup exists but final signal is false after filters.");
+        return;
     }
 
     // --- LOT SIZING AND MARGIN CHECK ---
@@ -271,8 +327,12 @@ void CheckForEntrySignals()
         double takeProfit = price + InpTakeProfitPoints * _Point;
         if(InpStopLossPoints == 0) stopLoss = 0;
         if(InpTakeProfitPoints == 0) takeProfit = 0;
-    
-        trade.Buy(lots, _Symbol, price, stopLoss, takeProfit, "TRE_Buy");
+        if(!trade.Buy(lots, _Symbol, price, stopLoss, takeProfit, "TRE_Buy"))
+        {
+            PrintFormat("Buy failed: retcode=%d reason=%s",
+                        trade.ResultRetcode(),
+                        trade.ResultRetcodeDescription());
+        }
     }
     
     if (bearishSignal)
@@ -282,8 +342,65 @@ void CheckForEntrySignals()
         if(InpStopLossPoints == 0) stopLoss = 0;
         if(InpTakeProfitPoints == 0) takeProfit = 0;
 
-        trade.Sell(lots, _Symbol, price, stopLoss, takeProfit, "TRE_Sell");
+        if(!trade.Sell(lots, _Symbol, price, stopLoss, takeProfit, "TRE_Sell"))
+        {
+            PrintFormat("Sell failed: retcode=%d reason=%s",
+                        trade.ResultRetcode(),
+                        trade.ResultRetcodeDescription());
+        }
     }
+}
+
+//+------------------------------------------------------------------+
+//| Linear regression slope on latest closed bars                    |
+//+------------------------------------------------------------------+
+double CalculateLinearRegressionSlope(const double &values[], const int period)
+{
+    if(period < 3) return 0.0;
+
+    double sumx = 0.0;
+    double sumxx = 0.0;
+    double sumxy = 0.0;
+    double sumy = 0.0;
+
+    for(int k = 0; k < period; k++)
+    {
+        const double y = values[k];
+        sumx += k;
+        sumxx += (double)k * (double)k;
+        sumxy += (double)k * y;
+        sumy += y;
+    }
+
+    const double denom = (sumx * sumx - (double)period * sumxx);
+    if(MathAbs(denom) < DBL_EPSILON) return 0.0;
+
+    return ((double)period * sumxy - sumx * sumy) / denom;
+}
+
+//+------------------------------------------------------------------+
+//| Slope divergence filter (same direction logic as slope indicator)|
+//+------------------------------------------------------------------+
+bool EvaluateSlopeDivergence(bool &bullishSlopeDivergence, bool &bearishSlopeDivergence, double &priceSlope, double &rsiSlope)
+{
+    bullishSlopeDivergence = false;
+    bearishSlopeDivergence = false;
+    priceSlope = 0.0;
+    rsiSlope = 0.0;
+
+    const int period = (InpSlope_Lookback_Bars > 2 ? InpSlope_Lookback_Bars : 3);
+    double rsiValues[];
+    double closePrices[];
+
+    if(CopyBuffer(rsi_handle, 0, 1, period, rsiValues) < period) return false;
+    if(CopyClose(_Symbol, _Period, 1, period, closePrices) < period) return false;
+
+    rsiSlope = CalculateLinearRegressionSlope(rsiValues, period);
+    priceSlope = CalculateLinearRegressionSlope(closePrices, period);
+
+    bullishSlopeDivergence = (priceSlope < 0.0 && rsiSlope > 0.0);
+    bearishSlopeDivergence = (priceSlope > 0.0 && rsiSlope < 0.0);
+    return true;
 }
 
 //+------------------------------------------------------------------+

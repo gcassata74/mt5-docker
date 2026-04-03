@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: mt5/Dockerfile
+    restart: unless-stopped  
     ports:
       - "1234:1234"
       - "8000:8080"
@@ -14,7 +15,7 @@ services:
       - VNC_COL_DEPTH=16
     volumes:
       - mt5_config:/config
-      - ./mt5/home:/home
+      - ./mt5/home/presets:/home/presets
       - "./mt5/experts:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Downloads"
       - "./mt5/indicators:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Downloads"
 
