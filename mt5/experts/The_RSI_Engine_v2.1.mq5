@@ -42,7 +42,7 @@ input int    InpRSI_Centerline     = 50;       // Centerline level
 input group "Strategy Signals & Exits"
 input bool   InpUse_Divergence_Signal         = true;     // Use RSI Divergence as a primary signal
 input bool   InpUse_OverboughtOversold_Reversal = true; // Use Overbought/Oversold reversal as a primary signal
-input bool   InpUse_Centerline_Confirmation = false;    // Wait for RSI to cross 50 for entry confirmation
+input bool   InpUse_Centerline_Confirmation=true;    // Wait for RSI to cross 50 for entry confirmation
 input bool   InpUse_RSI_Level_Exit        = false;     // Exit trades when RSI reaches opposite extreme
 input int    InpDivergence_Lookback_Bars    = 60;       // How many bars to look back for divergence
 input bool   InpRequire_Slope_Divergence   = false;      // Require opposite price/RSI slopes for entries
@@ -85,6 +85,17 @@ int           rsi_handle;
 //--- Global state variables for limits
 datetime      g_last_limit_check_day = 0;
 bool          g_daily_limit_reached = false;
+
+//+------------------------------------------------------------------+
+//| Returns the period used for slope-based divergence               |
+//+------------------------------------------------------------------+
+int GetSlopePeriod()
+{
+    // Prefer dedicated slope lookback; fallback keeps legacy sets usable.
+    if(InpSlope_Lookback_Bars > 2) return InpSlope_Lookback_Bars;
+    if(InpDivergence_Lookback_Bars > 2) return InpDivergence_Lookback_Bars;
+    return 3;
+}
 
 
 //+------------------------------------------------------------------+
@@ -388,7 +399,7 @@ bool EvaluateSlopeDivergence(bool &bullishSlopeDivergence, bool &bearishSlopeDiv
     priceSlope = 0.0;
     rsiSlope = 0.0;
 
-    const int period = (InpSlope_Lookback_Bars > 2 ? InpSlope_Lookback_Bars : 3);
+    const int period = GetSlopePeriod();
     double rsiValues[];
     double closePrices[];
 
@@ -430,66 +441,42 @@ void ManageOpenTrades()
 //+------------------------------------------------------------------+
 bool CheckBullishDivergence()
 {
-    const int data_to_copy = InpDivergence_Lookback_Bars + 5;
-    double low_prices[];
-    double rsi_values[];
-    ArraySetAsSeries(low_prices, true);
-    ArraySetAsSeries(rsi_values, true);
+    bool bullishSlopeDivergence = false;
+    bool bearishSlopeDivergence = false;
+    double priceSlope = 0.0;
+    double rsiSlope = 0.0;
+    if(!EvaluateSlopeDivergence(bullishSlopeDivergence, bearishSlopeDivergence, priceSlope, rsiSlope))
+        return false;
 
-    if(CopyLow(_Symbol, _Period, 0, data_to_copy, low_prices) < data_to_copy) return false;
-    if(CopyBuffer(rsi_handle, 0, 0, data_to_copy, rsi_values) < data_to_copy) return false;
-    
-    int lookback_half = InpDivergence_Lookback_Bars / 2;
-    int recentLowIndex = iLowest(_Symbol, _Period, MODE_LOW, lookback_half, 1);
-    int previousLowIndex = iLowest(_Symbol, _Period, MODE_LOW, lookback_half, 1 + lookback_half);
-
-    if(recentLowIndex < 0 || previousLowIndex < 0) return false;
-
-    double recentLowPrice = low_prices[recentLowIndex];
-    double previousLowPrice = low_prices[previousLowIndex];
-    double rsiAtRecentLow = rsi_values[recentLowIndex];
-    double rsiAtPreviousLow = rsi_values[previousLowIndex];
-
-    if (recentLowPrice < previousLowPrice && rsiAtRecentLow > rsiAtPreviousLow)
+    if(bullishSlopeDivergence)
     {
-            Print("Bullish Divergence Detected: Price Lows at bars ", previousLowIndex, " and ", recentLowIndex);
-            return true;
+        PrintFormat("Bullish Divergence Detected (slope): priceSlope=%.8f rsiSlope=%.8f", priceSlope, rsiSlope);
+        return true;
     }
     return false;
 }
+
 
 //+------------------------------------------------------------------+
 //| Checks for Bearish Divergence                                    |
 //+------------------------------------------------------------------+
 bool CheckBearishDivergence()
 {
-    const int data_to_copy = InpDivergence_Lookback_Bars + 5;
-    double high_prices[];
-    double rsi_values[];
-    ArraySetAsSeries(high_prices, true);
-    ArraySetAsSeries(rsi_values, true);
-    
-    if(CopyHigh(_Symbol, _Period, 0, data_to_copy, high_prices) < data_to_copy) return false;
-    if(CopyBuffer(rsi_handle, 0, 0, data_to_copy, rsi_values) < data_to_copy) return false;
+    bool bullishSlopeDivergence = false;
+    bool bearishSlopeDivergence = false;
+    double priceSlope = 0.0;
+    double rsiSlope = 0.0;
+    if(!EvaluateSlopeDivergence(bullishSlopeDivergence, bearishSlopeDivergence, priceSlope, rsiSlope))
+        return false;
 
-    int lookback_half = InpDivergence_Lookback_Bars / 2;
-    int recentHighIndex = iHighest(_Symbol, _Period, MODE_HIGH, lookback_half, 1);
-    int previousHighIndex = iHighest(_Symbol, _Period, MODE_HIGH, lookback_half, 1 + lookback_half);
-
-    if(recentHighIndex < 0 || previousHighIndex < 0) return false;
-
-    double recentHighPrice = high_prices[recentHighIndex];
-    double previousHighPrice = high_prices[previousHighIndex];
-    double rsiAtRecentHigh = rsi_values[recentHighIndex];
-    double rsiAtPreviousHigh = rsi_values[previousHighIndex];
-
-    if (recentHighPrice > previousHighPrice && rsiAtRecentHigh < rsiAtPreviousHigh)
+    if(bearishSlopeDivergence)
     {
-            Print("Bearish Divergence Detected: Price Highs at bars ", previousHighIndex, " and ", recentHighIndex);
-            return true;
+        PrintFormat("Bearish Divergence Detected (slope): priceSlope=%.8f rsiSlope=%.8f", priceSlope, rsiSlope);
+        return true;
     }
     return false;
 }
+
 
 //+------------------------------------------------------------------+
 //| News Filter: Checks if we are in the no-trade news window        |

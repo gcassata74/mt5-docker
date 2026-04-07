@@ -67,7 +67,7 @@ InpRSI_Oversold=22
 InpRSI_Centerline=50
 InpUse_Divergence_Signal=true
 InpUse_OverboughtOversold_Reversal=false
-InpUse_Centerline_Confirmation=false
+InpUse_Centerline_Confirmation=true
 InpUse_RSI_Level_Exit=false
 InpDivergence_Lookback_Bars=48
 EnableDailyLimits=true
@@ -117,7 +117,7 @@ Important:
 | `InpRSI_Centerline` | `50` | RSI level | RSI centerline for optional confirmation | N/A |
 | `InpUse_Divergence_Signal` | `true` | bool | Use RSI divergence entries | N/A |
 | `InpUse_OverboughtOversold_Reversal` | `false` | bool | Disable OB/OS reversal entries | N/A |
-| `InpUse_Centerline_Confirmation` | `false` | bool | No centerline confirmation required | N/A |
+| `InpUse_Centerline_Confirmation` | `true` | bool | Require centerline confirmation | N/A |
 | `InpUse_RSI_Level_Exit` | `false` | bool | Exit by RSI levels disabled | N/A |
 | `InpDivergence_Lookback_Bars` | `48` | bars | Bars used to detect divergence | On M5, ~4 hours window |
 | `EnableDailyLimits` | `true` | bool | Enable daily stop rules | N/A |
