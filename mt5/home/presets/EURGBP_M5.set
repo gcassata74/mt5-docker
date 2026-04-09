@@ -1,29 +1,30 @@
-; EURGBP M5 - RSI Divergence Focus (optimized TP/SL preset)
-InpUseRiskManagement=false
-InpRiskPercent=3.0
+; EURGBP M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
+; Note: EURGBP e' bassa volatilita' - RSI period 9 e lookback piu' lungo
+InpUseRiskManagement=true
+InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=60
-InpTakeProfitPoints=70
+InpStopLossPoints=50
+InpTakeProfitPoints=75
 InpMagicNumber=190229
-InpMaxSpreadPoints=16
+InpMaxSpreadPoints=15
 InpUseTrailingStop=true
-InpTrailingStopTrigger=30
-InpTrailingStopStep=12
-InpRSI_Period=7
-InpRSI_Overbought=80
-InpRSI_Oversold=20
+InpTrailingStopTrigger=35
+InpTrailingStopStep=10
+InpRSI_Period=9
+InpRSI_Overbought=75
+InpRSI_Oversold=25
 InpRSI_Centerline=50
 InpUse_Divergence_Signal=true
 InpUse_OverboughtOversold_Reversal=false
-InpUse_Centerline_Confirmation=true
+InpUse_Centerline_Confirmation=false
 InpUse_RSI_Level_Exit=false
-InpDivergence_Lookback_Bars=42
+InpDivergence_Lookback_Bars=45
 InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpSlope_Lookback_Bars=35
 EnableDailyLimits=true
 DailyProfitTarget=130.0
 DailyLossLimit=260.0
-InpUseNewsFilter=true
+InpUseNewsFilter=false
 InpNewsTimeHour=15
 InpNewsTimeMinute=30
 InpMinutesBeforeNews=30

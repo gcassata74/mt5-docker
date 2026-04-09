@@ -1,29 +1,30 @@
-; USDCNH M5 - RSI Divergence Focus (optimized TP/SL preset)
-InpUseRiskManagement=false
-InpRiskPercent=3.0
+; USDCNH M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
+; Note: USDCNH spread elevato e liquidita' variabile - SL/TP piu' ampi
+InpUseRiskManagement=true
+InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=120
-InpTakeProfitPoints=150
+InpStopLossPoints=150
+InpTakeProfitPoints=225
 InpMagicNumber=190228
 InpMaxSpreadPoints=35
 InpUseTrailingStop=true
-InpTrailingStopTrigger=60
-InpTrailingStopStep=25
-InpRSI_Period=7
-InpRSI_Overbought=80
-InpRSI_Oversold=20
+InpTrailingStopTrigger=90
+InpTrailingStopStep=28
+InpRSI_Period=9
+InpRSI_Overbought=75
+InpRSI_Oversold=25
 InpRSI_Centerline=50
 InpUse_Divergence_Signal=true
 InpUse_OverboughtOversold_Reversal=false
-InpUse_Centerline_Confirmation=true
+InpUse_Centerline_Confirmation=false
 InpUse_RSI_Level_Exit=false
-InpDivergence_Lookback_Bars=48
+InpDivergence_Lookback_Bars=40
 InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpSlope_Lookback_Bars=35
 EnableDailyLimits=true
 DailyProfitTarget=120.0
 DailyLossLimit=240.0
-InpUseNewsFilter=true
+InpUseNewsFilter=false
 InpNewsTimeHour=15
 InpNewsTimeMinute=30
 InpMinutesBeforeNews=30
