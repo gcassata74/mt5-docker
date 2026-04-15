@@ -409,8 +409,9 @@ bool EvaluateSlopeDivergence(bool &bullishSlopeDivergence, bool &bearishSlopeDiv
     rsiSlope = CalculateLinearRegressionSlope(rsiValues, period);
     priceSlope = CalculateLinearRegressionSlope(closePrices, period);
 
-    bullishSlopeDivergence = (priceSlope < 0.0 && rsiSlope > 0.0);
-    bearishSlopeDivergence = (priceSlope > 0.0 && rsiSlope < 0.0);
+    // FIX: k=0 is most recent bar, so price going DOWN = slope > 0, RSI going UP = slope < 0
+    bullishSlopeDivergence = (priceSlope > 0.0 && rsiSlope < 0.0); // price down + RSI up = bullish div
+    bearishSlopeDivergence = (priceSlope < 0.0 && rsiSlope > 0.0); // price up + RSI down = bearish div
     return true;
 }
 
