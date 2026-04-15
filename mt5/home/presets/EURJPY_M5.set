@@ -1,29 +1,30 @@
-; EURJPY M5 - RSI Divergence Focus (optimized TP/SL preset)
+; EURJPY M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
+; Note: EURJPY alta volatilita' - SL/TP piu' ampi, lookback piu' corto
 InpUseRiskManagement=false
-InpRiskPercent=3.0
+InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=85
-InpTakeProfitPoints=100
+InpStopLossPoints=90
+InpTakeProfitPoints=135
 InpMagicNumber=190230
 InpMaxSpreadPoints=18
 InpUseTrailingStop=true
-InpTrailingStopTrigger=45
+InpTrailingStopTrigger=55
 InpTrailingStopStep=20
 InpRSI_Period=7
-InpRSI_Overbought=80
-InpRSI_Oversold=20
+InpRSI_Overbought=75
+InpRSI_Oversold=25
 InpRSI_Centerline=50
 InpUse_Divergence_Signal=true
 InpUse_OverboughtOversold_Reversal=false
-InpUse_Centerline_Confirmation=true
+InpUse_Centerline_Confirmation=false
 InpUse_RSI_Level_Exit=false
-InpDivergence_Lookback_Bars=30
+InpDivergence_Lookback_Bars=25
 InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpSlope_Lookback_Bars=30
 EnableDailyLimits=true
 DailyProfitTarget=190.0
 DailyLossLimit=380.0
-InpUseNewsFilter=true
+InpUseNewsFilter=false
 InpNewsTimeHour=15
 InpNewsTimeMinute=30
 InpMinutesBeforeNews=30

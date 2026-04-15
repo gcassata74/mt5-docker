@@ -1,25 +1,25 @@
-; EURUSD M5 - RSI Divergence Focus (optimized TP/SL preset)
+; EURUSD M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
 InpUseRiskManagement=false
-InpRiskPercent=3.0
+InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=70
-InpTakeProfitPoints=80
+InpStopLossPoints=60
+InpTakeProfitPoints=90
 InpMagicNumber=190214
-InpMaxSpreadPoints=12
+InpMaxSpreadPoints=10
 InpUseTrailingStop=true
-InpTrailingStopTrigger=35
-InpTrailingStopStep=15
+InpTrailingStopTrigger=45
+InpTrailingStopStep=12
 InpRSI_Period=7
-InpRSI_Overbought=80
-InpRSI_Oversold=20
+InpRSI_Overbought=75
+InpRSI_Oversold=25
 InpRSI_Centerline=50
 InpUse_Divergence_Signal=true
 InpUse_OverboughtOversold_Reversal=false
-InpUse_Centerline_Confirmation=true
+InpUse_Centerline_Confirmation=false
 InpUse_RSI_Level_Exit=false
-InpDivergence_Lookback_Bars=36
+InpDivergence_Lookback_Bars=28
 InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpSlope_Lookback_Bars=30
 EnableDailyLimits=true
 DailyProfitTarget=150.0
 DailyLossLimit=300.0
