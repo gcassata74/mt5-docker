@@ -1,6 +1,6 @@
 ; USDCNH M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
 ; Note: USDCNH spread elevato e liquidita' variabile - SL/TP piu' ampi
-InpUseRiskManagement=true
+InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
 InpStopLossPoints=150

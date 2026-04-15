@@ -1,5 +1,5 @@
 ; AUDUSD M5 - RSI Divergence Scalping (R:R 1.54:1 optimized)
-InpUseRiskManagement=true
+InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
 InpStopLossPoints=65

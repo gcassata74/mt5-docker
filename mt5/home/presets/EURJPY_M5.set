@@ -1,6 +1,6 @@
 ; EURJPY M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
 ; Note: EURJPY alta volatilita' - SL/TP piu' ampi, lookback piu' corto
-InpUseRiskManagement=true
+InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
 InpStopLossPoints=90
