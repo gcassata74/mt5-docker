@@ -256,13 +256,14 @@ bool CheckClassicBearishDivergence()
 //+------------------------------------------------------------------+
 bool CheckBullishDivergence()
 {
-    // FIX v2.2: RSI must be in oversold zone for a valid bullish divergence
     double rsi1 = GetRSI(1);
-    if(rsi1 < 0 || rsi1 >= InpRSI_Oversold)
+    if(rsi1 < 0) return false;
+
+    // OB/OS filter: only apply when user set a meaningful oversold level (> 0)
+    if(InpRSI_Oversold > 0 && rsi1 >= InpRSI_Oversold)
     {
         if(InpVerboseEntryLogs)
-            PrintFormat("Slope bullish divergence blocked: RSI(1)=%.2f not in oversold zone (<%d)",
-                        rsi1, InpRSI_Oversold);
+            PrintFormat("Slope bullish blocked: RSI(1)=%.2f not in oversold zone (<%d)", rsi1, InpRSI_Oversold);
         return false;
     }
 
@@ -278,13 +279,14 @@ bool CheckBullishDivergence()
 
 bool CheckBearishDivergence()
 {
-    // FIX v2.2: RSI must be in overbought zone for a valid bearish divergence
     double rsi1 = GetRSI(1);
-    if(rsi1 < 0 || rsi1 <= InpRSI_Overbought)
+    if(rsi1 < 0) return false;
+
+    // OB/OS filter: only apply when user set a meaningful overbought level (< 100)
+    if(InpRSI_Overbought < 100 && rsi1 <= InpRSI_Overbought)
     {
         if(InpVerboseEntryLogs)
-            PrintFormat("Slope bearish divergence blocked: RSI(1)=%.2f not in overbought zone (>%d)",
-                        rsi1, InpRSI_Overbought);
+            PrintFormat("Slope bearish blocked: RSI(1)=%.2f not in overbought zone (>%d)", rsi1, InpRSI_Overbought);
         return false;
     }
 
