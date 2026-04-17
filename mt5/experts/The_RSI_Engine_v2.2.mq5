@@ -525,12 +525,21 @@ void ManageOpenTrades()
         double ps, rs;
         if(!EvaluateSlopeDivergence(bullish, bearish, ps, rs)) return;
 
-        bool exitBuy  = (posInfo.PositionType() == POSITION_TYPE_BUY  && ps < 0.0); // price turned bullish
-        bool exitSell = (posInfo.PositionType() == POSITION_TYPE_SELL && ps > 0.0); // price turned bearish
+        bool isBuy  = (posInfo.PositionType() == POSITION_TYPE_BUY);
+        bool isSell = (posInfo.PositionType() == POSITION_TYPE_SELL);
 
-        if(exitBuy || exitSell)
+        // Profit exit: price inverted in expected direction
+        bool profitExitBuy  = isBuy  && ps < 0.0; // price turned bullish after being bearish
+        bool profitExitSell = isSell && ps > 0.0; // price turned bearish after being bullish
+
+        // Signal failed: both slopes aligned AGAINST the trade
+        bool failedBuy  = isBuy  && ps > 0.0 && rs > 0.0; // both bearish = BUY signal failed
+        bool failedSell = isSell && ps < 0.0 && rs < 0.0; // both bullish = SELL signal failed
+
+        if(profitExitBuy || profitExitSell || failedBuy || failedSell)
         {
-            PrintFormat("Slope inversion exit: priceSlope=%.8f rsiSlope=%.8f", ps, rs);
+            string reason = (profitExitBuy || profitExitSell) ? "profit" : "signal failed";
+            PrintFormat("Slope exit (%s): priceSlope=%.8f rsiSlope=%.8f", reason, ps, rs);
             trade.PositionClose(posInfo.Ticket());
         }
     }
