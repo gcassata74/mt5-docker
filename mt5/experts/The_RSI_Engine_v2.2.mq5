@@ -47,6 +47,7 @@ input bool   InpUse_Classic_Divergence           = true;  // Use classic swing h
 input bool   InpUse_OverboughtOversold_Reversal  = true;  // Use Overbought/Oversold reversal as a primary signal
 input bool   InpUse_Centerline_Confirmation      = true;  // Wait for RSI to cross 50 for entry confirmation
 input bool   InpUse_RSI_Level_Exit               = false; // Exit trades when RSI reaches opposite extreme
+input bool   InpUse_Slope_Alignment_Exit         = true;  // Exit when price slope aligns with RSI slope (divergence resolved)
 input int    InpDivergence_Lookback_Bars         = 60;    // Bars to look back for classic swing divergence
 input bool   InpRequire_Slope_Divergence         = false; // Require opposite price/RSI slopes for entries
 input int    InpSlope_Lookback_Bars              = 50;    // Slope lookback bars (linear regression)
@@ -499,19 +500,40 @@ bool EvaluateSlopeDivergence(bool &bullish, bool &bearish, double &priceSlope, d
 }
 
 //+------------------------------------------------------------------+
-//| Manages currently open trades (RSI level exit)                   |
+//| Manages currently open trades: RSI exit + slope alignment exit   |
 //+------------------------------------------------------------------+
 void ManageOpenTrades()
 {
-    if(!InpUse_RSI_Level_Exit) return;
+    if(!posInfo.SelectByMagic(_Symbol, InpMagicNumber)) return;
 
-    if(posInfo.SelectByMagic(_Symbol, InpMagicNumber))
+    // --- RSI level exit ---
+    if(InpUse_RSI_Level_Exit)
     {
-        double rsi = GetRSI(1); // FIX v2.2: use closed bar RSI
+        double rsi = GetRSI(1);
         if(posInfo.PositionType() == POSITION_TYPE_BUY  && rsi >= InpRSI_Overbought)
+        { trade.PositionClose(posInfo.Ticket()); return; }
+        if(posInfo.PositionType() == POSITION_TYPE_SELL && rsi <= InpRSI_Oversold)
+        { trade.PositionClose(posInfo.Ticket()); return; }
+    }
+
+    // --- Slope alignment exit ---
+    // BUY was entered on: price bearish (slope>0) + RSI bullish (slope<0)
+    // Exit BUY when price aligns with RSI: both slopes same sign (divergence resolved)
+    // SELL was entered on: price bullish (slope<0) + RSI bearish (slope>0)
+    // Exit SELL when price aligns with RSI: both slopes same sign
+    if(InpUse_Slope_Alignment_Exit)
+    {
+        bool bullish, bearish;
+        double ps, rs;
+        if(!EvaluateSlopeDivergence(bullish, bearish, ps, rs)) return;
+
+        bool divergenceResolved = (!bullish && !bearish); // slopes aligned or flat
+
+        if(divergenceResolved)
+        {
+            PrintFormat("Slope alignment exit: priceSlope=%.8f rsiSlope=%.8f — divergence resolved", ps, rs);
             trade.PositionClose(posInfo.Ticket());
-        else if(posInfo.PositionType() == POSITION_TYPE_SELL && rsi <= InpRSI_Oversold)
-            trade.PositionClose(posInfo.Ticket());
+        }
     }
 }
 

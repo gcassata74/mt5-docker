@@ -18,6 +18,7 @@ InpUse_Classic_Divergence=false
 InpUse_OverboughtOversold_Reversal=false
 InpUse_Centerline_Confirmation=false
 InpUse_RSI_Level_Exit=false
+InpUse_Slope_Alignment_Exit=true
 InpDivergence_Lookback_Bars=25
 InpRequire_Slope_Divergence=true
 InpSlope_Lookback_Bars=30
