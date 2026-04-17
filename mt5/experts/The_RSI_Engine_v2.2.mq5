@@ -517,21 +517,20 @@ void ManageOpenTrades()
     }
 
     // --- Slope alignment exit ---
-    // BUY was entered on: price bearish (slope>0) + RSI bullish (slope<0)
-    // Exit BUY when price aligns with RSI: both slopes same sign (divergence resolved)
-    // SELL was entered on: price bullish (slope<0) + RSI bearish (slope>0)
-    // Exit SELL when price aligns with RSI: both slopes same sign
+    // BUY entered on price bearish (priceSlope>0): exit when price slope turns bullish (priceSlope<0)
+    // SELL entered on price bullish (priceSlope<0): exit when price slope turns bearish (priceSlope>0)
     if(InpUse_Slope_Alignment_Exit)
     {
         bool bullish, bearish;
         double ps, rs;
         if(!EvaluateSlopeDivergence(bullish, bearish, ps, rs)) return;
 
-        bool divergenceResolved = (!bullish && !bearish); // slopes aligned or flat
+        bool exitBuy  = (posInfo.PositionType() == POSITION_TYPE_BUY  && ps < 0.0); // price turned bullish
+        bool exitSell = (posInfo.PositionType() == POSITION_TYPE_SELL && ps > 0.0); // price turned bearish
 
-        if(divergenceResolved)
+        if(exitBuy || exitSell)
         {
-            PrintFormat("Slope alignment exit: priceSlope=%.8f rsiSlope=%.8f — divergence resolved", ps, rs);
+            PrintFormat("Slope inversion exit: priceSlope=%.8f rsiSlope=%.8f", ps, rs);
             trade.PositionClose(posInfo.Ticket());
         }
     }
