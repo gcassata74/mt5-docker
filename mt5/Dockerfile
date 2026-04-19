@@ -23,4 +23,7 @@ COPY ./mt5/mt5setup.exe /root/mt5setup.exe
 COPY ./mt5/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+COPY ./mt5/run_mt5.sh /run_mt5.sh
+RUN chmod +x /run_mt5.sh
+
 CMD ["/entrypoint.sh"]

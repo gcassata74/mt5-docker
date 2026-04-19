@@ -3,7 +3,8 @@ services:
     build:
       context: .
       dockerfile: mt5/Dockerfile
-    restart: unless-stopped  
+    restart: unless-stopped
+    stop_grace_period: 40s
     ports:
       - "1234:1234"
       - "8000:8080"
