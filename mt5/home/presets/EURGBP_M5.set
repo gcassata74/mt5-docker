@@ -1,30 +1,31 @@
-; EURGBP M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
-; Note: EURGBP e' bassa volatilita' - RSI period 9 e lookback piu' lungo
+; EURGBP M5 - v2.3 Slope Alignment Cycle (starting point, not backtested)
+; Note: bassa volatilita' - lookback piu' lungo, SL piu' stretto
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=50
-InpTakeProfitPoints=75
+InpStopLossPoints=45
+InpTakeProfitPoints=135
 InpMagicNumber=190229
 InpMaxSpreadPoints=15
 InpUseTrailingStop=true
 InpUseBreakEven=true
-InpBreakEvenTrigger=30
-InpTrailingStopTrigger=40
-InpTrailingStopStep=12
+InpBreakEvenTrigger=22
+InpTrailingStopTrigger=32
+InpTrailingStopStep=10
 InpRSI_Period=9
 InpRSI_Overbought=100
 InpRSI_Oversold=0
 InpRSI_Centerline=50
-InpUse_Divergence_Signal=true
+InpUse_Divergence_Signal=false
 InpUse_Classic_Divergence=false
+InpUse_Slope_Alignment_Entry=true
 InpUse_OverboughtOversold_Reversal=false
 InpUse_Centerline_Confirmation=false
 InpUse_RSI_Level_Exit=false
 InpUse_Slope_Alignment_Exit=true
 InpDivergence_Lookback_Bars=45
-InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpRequire_Slope_Divergence=false
+InpSlope_Lookback_Bars=35
 InpMinDivergenceBars=1
 EnableDailyLimits=true
 DailyProfitTarget=130.0

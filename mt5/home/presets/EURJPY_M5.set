@@ -1,30 +1,31 @@
-; EURJPY M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
-; Note: EURJPY alta volatilita' - SL/TP piu' ampi, lookback piu' corto
+; EURJPY M5 - v2.3 Slope Alignment Cycle (starting point, not backtested)
+; Note: alta volatilita' - SL/TP piu' ampi, lookback piu' corto
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=90
-InpTakeProfitPoints=135
+InpStopLossPoints=80
+InpTakeProfitPoints=240
 InpMagicNumber=190230
 InpMaxSpreadPoints=18
 InpUseTrailingStop=true
 InpUseBreakEven=true
-InpBreakEvenTrigger=55
-InpTrailingStopTrigger=72
-InpTrailingStopStep=22
+InpBreakEvenTrigger=45
+InpTrailingStopTrigger=60
+InpTrailingStopStep=20
 InpRSI_Period=7
 InpRSI_Overbought=100
 InpRSI_Oversold=0
 InpRSI_Centerline=50
-InpUse_Divergence_Signal=true
+InpUse_Divergence_Signal=false
 InpUse_Classic_Divergence=false
+InpUse_Slope_Alignment_Entry=true
 InpUse_OverboughtOversold_Reversal=false
 InpUse_Centerline_Confirmation=false
 InpUse_RSI_Level_Exit=false
 InpUse_Slope_Alignment_Exit=true
 InpDivergence_Lookback_Bars=25
-InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpRequire_Slope_Divergence=false
+InpSlope_Lookback_Bars=25
 InpMinDivergenceBars=1
 EnableDailyLimits=true
 DailyProfitTarget=190.0
