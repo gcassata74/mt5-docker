@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025, The RSI Engine MT5 EA by SPLpluse"
 #property link      "https://splpulse.com"
-#property version   "2.2" // v2.2: Classic swing divergence + OB/OS zone filter + break-even stop
+#property version   "2.3" // v2.3: Slope alignment entry + one-slope disalignment exit
 
 //--- Include the standard MQL5 trading library
 #include <Trade\Trade.mqh>
@@ -43,11 +43,12 @@ input int    InpRSI_Centerline     = 50;        // Centerline level
 //--- Strategy Signals & Exits Group
 input group "Strategy Signals & Exits"
 input bool   InpUse_Divergence_Signal            = true;  // Use RSI Divergence as a primary signal
-input bool   InpUse_Classic_Divergence           = true;  // Use classic swing high/low divergence (v2.2)
+input bool   InpUse_Classic_Divergence           = true;  // Use classic swing high/low divergence
+input bool   InpUse_Slope_Alignment_Entry        = true;  // [v2.3] Enter when price AND RSI slopes align
 input bool   InpUse_OverboughtOversold_Reversal  = true;  // Use Overbought/Oversold reversal as a primary signal
 input bool   InpUse_Centerline_Confirmation      = true;  // Wait for RSI to cross 50 for entry confirmation
 input bool   InpUse_RSI_Level_Exit               = false; // Exit trades when RSI reaches opposite extreme
-input bool   InpUse_Slope_Alignment_Exit         = true;  // Exit when price slope aligns with RSI slope (divergence resolved)
+input bool   InpUse_Slope_Alignment_Exit         = true;  // [v2.3] Exit when ONE slope disaligns from trade direction
 input int    InpDivergence_Lookback_Bars         = 60;    // Bars to look back for classic swing divergence
 input bool   InpRequire_Slope_Divergence         = false; // Require opposite price/RSI slopes for entries
 input int    InpSlope_Lookback_Bars              = 50;    // Slope lookback bars (linear regression)
@@ -91,8 +92,14 @@ int           rsi_handle;
 datetime      g_last_limit_check_day = 0;
 bool          g_daily_limit_reached  = false;
 
+//--- [v2.3] Slope alignment cycle state
+// Tracks whether a divergence has been registered since the last trade,
+// so entry only fires on the transition divergence→alignment, not on alignment alone.
+bool          g_saw_bullish_div = false;
+bool          g_saw_bearish_div = false;
+
 //+------------------------------------------------------------------+
-//| Returns the period used for slope-based divergence               |
+//| Returns the period used for slope-based calculations             |
 //+------------------------------------------------------------------+
 int GetSlopePeriod()
 {
@@ -136,7 +143,7 @@ int OnInit()
     }
 
     int bePoints = (InpBreakEvenTrigger > 0) ? InpBreakEvenTrigger : InpStopLossPoints;
-    PrintFormat("RSI Engine v2.2 initialized. BreakEven trigger: %d pts, Trailing trigger: %d pts",
+    PrintFormat("RSI Engine v2.3 initialized. BreakEven trigger: %d pts, Trailing trigger: %d pts",
                 bePoints, InpTrailingStopTrigger);
     return(INIT_SUCCEEDED);
 }
@@ -147,7 +154,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
     IndicatorRelease(rsi_handle);
-    Print("RSI Engine v2.2 deinitialized. Reason: ", reason);
+    Print("RSI Engine v2.3 deinitialized. Reason: ", reason);
 }
 
 //+------------------------------------------------------------------+
@@ -181,14 +188,12 @@ void OnTick()
 
 //+------------------------------------------------------------------+
 //| Classic swing divergence: compares price swing lows/highs vs RSI |
-//| FIX v2.2: uses InpDivergence_Lookback_Bars correctly             |
 //+------------------------------------------------------------------+
 bool CheckClassicBullishDivergence()
 {
     int lookback = InpDivergence_Lookback_Bars;
     if(lookback < 4) return false;
 
-    // Find the two most recent swing lows in price within lookback
     int bar1 = iLowest(_Symbol, _Period, MODE_LOW, lookback, 1);
     if(bar1 <= 0) return false;
 
@@ -202,7 +207,6 @@ bool CheckClassicBullishDivergence()
     double rsiLow2 = GetRSI(bar2);
     if(rsiLow1 < 0 || rsiLow2 < 0) return false;
 
-    // Classic bullish divergence: price lower low, RSI higher low, RSI in oversold zone
     bool priceMakesLowerLow = (priceLow1 < priceLow2);
     bool rsiMakesHigherLow  = (rsiLow1 > rsiLow2);
     bool rsiInOversold      = (rsiLow1 < InpRSI_Oversold);
@@ -221,7 +225,6 @@ bool CheckClassicBearishDivergence()
     int lookback = InpDivergence_Lookback_Bars;
     if(lookback < 4) return false;
 
-    // Find the two most recent swing highs in price within lookback
     int bar1 = iHighest(_Symbol, _Period, MODE_HIGH, lookback, 1);
     if(bar1 <= 0) return false;
 
@@ -235,7 +238,6 @@ bool CheckClassicBearishDivergence()
     double rsiHigh2 = GetRSI(bar2);
     if(rsiHigh1 < 0 || rsiHigh2 < 0) return false;
 
-    // Classic bearish divergence: price higher high, RSI lower high, RSI in overbought zone
     bool priceMakesHigherHigh = (priceHigh1 > priceHigh2);
     bool rsiMakesLowerHigh    = (rsiHigh1 < rsiHigh2);
     bool rsiInOverbought      = (rsiHigh1 > InpRSI_Overbought);
@@ -251,14 +253,12 @@ bool CheckClassicBearishDivergence()
 
 //+------------------------------------------------------------------+
 //| Slope divergence: linear regression comparison                   |
-//| FIX v2.2: OB/OS zone filter added                                |
 //+------------------------------------------------------------------+
 bool CheckBullishDivergence()
 {
     double rsi1 = GetRSI(1);
     if(rsi1 < 0) return false;
 
-    // OB/OS filter: only apply when user set a meaningful oversold level (> 0)
     if(InpRSI_Oversold > 0 && rsi1 >= InpRSI_Oversold)
     {
         if(InpVerboseEntryLogs)
@@ -281,7 +281,6 @@ bool CheckBearishDivergence()
     double rsi1 = GetRSI(1);
     if(rsi1 < 0) return false;
 
-    // OB/OS filter: only apply when user set a meaningful overbought level (< 100)
     if(InpRSI_Overbought < 100 && rsi1 <= InpRSI_Overbought)
     {
         if(InpVerboseEntryLogs)
@@ -297,6 +296,55 @@ bool CheckBearishDivergence()
         PrintFormat("Slope Bearish Divergence: priceSlope=%.8f rsiSlope=%.8f RSI=%.2f", ps, rs, rsi1);
 
     return bearish;
+}
+
+//+------------------------------------------------------------------+
+//| [v2.3] Slope alignment cycle: divergence → alignment → entry    |
+//|                                                                  |
+//| Cycle:                                                           |
+//|  1. Register divergence (opposite slope signs)                  |
+//|  2. Fire entry when slopes transition to alignment (same sign)  |
+//|  3. Exit when one slope diverges again (ManageOpenTrades)        |
+//|  4. Repeat                                                       |
+//|                                                                  |
+//| Zero slope (ps==0 or rs==0) is treated as neutral:              |
+//|  - Does NOT register as divergence                              |
+//|  - Does NOT trigger alignment entry                             |
+//|  - Does NOT trigger disalignment exit                           |
+//|    (horizontal slope = undecided, wait for direction)           |
+//+------------------------------------------------------------------+
+void EvaluateSlopeAlignmentCycle(bool &bullishEntry, bool &bearishEntry)
+{
+    bullishEntry = false;
+    bearishEntry = false;
+
+    double ps, rs;
+    if(!GetSlopes(ps, rs)) return;
+
+    if(InpVerboseEntryLogs)
+        PrintFormat("Slope cycle: priceSlope=%.8f rsiSlope=%.8f | sawBullDiv=%s sawBearDiv=%s",
+                    ps, rs,
+                    g_saw_bullish_div ? "yes" : "no",
+                    g_saw_bearish_div ? "yes" : "no");
+
+    // Step 1 — register divergence (strict sign check, zero = neutral)
+    // Reset opposite flag when new divergence forms so we always track the latest setup
+    if(ps > 0.0 && rs < 0.0) { g_saw_bullish_div = true;  g_saw_bearish_div = false; }
+    if(ps < 0.0 && rs > 0.0) { g_saw_bearish_div = true;  g_saw_bullish_div = false; }
+
+    // Step 2 — fire entry on transition divergence→alignment
+    if(g_saw_bullish_div && ps < 0.0 && rs < 0.0)
+    {
+        PrintFormat("Slope Alignment BUY: priceSlope=%.8f rsiSlope=%.8f (after bullish divergence)", ps, rs);
+        bullishEntry      = true;
+        g_saw_bullish_div = false; // consume the setup
+    }
+    if(g_saw_bearish_div && ps > 0.0 && rs > 0.0)
+    {
+        PrintFormat("Slope Alignment SELL: priceSlope=%.8f rsiSlope=%.8f (after bearish divergence)", ps, rs);
+        bearishEntry      = true;
+        g_saw_bearish_div = false; // consume the setup
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -331,17 +379,22 @@ void CheckForEntrySignals()
     {
         if(InpUse_Classic_Divergence)
         {
-            // FIX v2.2: classic swing divergence using InpDivergence_Lookback_Bars
             bullishDivergence = CheckClassicBullishDivergence();
             bearishDivergence = CheckClassicBearishDivergence();
         }
         else
         {
-            // Legacy slope divergence (with OB/OS zone filter in v2.2)
             bullishDivergence = CheckBullishDivergence();
             bearishDivergence = CheckBearishDivergence();
         }
     }
+
+    // --- [v2.3] Slope alignment signals (divergence → alignment cycle) ---
+    bool bullishAlignment = false;
+    bool bearishAlignment = false;
+
+    if(InpUse_Slope_Alignment_Entry)
+        EvaluateSlopeAlignmentCycle(bullishAlignment, bearishAlignment);
 
     // --- OB/OS Reversal signals ---
     bool bullishReversal = InpUse_OverboughtOversold_Reversal
@@ -351,7 +404,9 @@ void CheckForEntrySignals()
         ? (GetRSI(2) > InpRSI_Overbought && GetRSI(1) < InpRSI_Overbought)
         : false;
 
-    if(!bullishDivergence && !bearishDivergence && !bullishReversal && !bearishReversal)
+    if(!bullishDivergence && !bearishDivergence &&
+       !bullishAlignment  && !bearishAlignment  &&
+       !bullishReversal   && !bearishReversal)
     {
         if(InpVerboseEntryLogs)
             PrintFormat("No signal: RSI(2)=%.2f RSI(1)=%.2f", GetRSI(2), GetRSI(1));
@@ -359,7 +414,7 @@ void CheckForEntrySignals()
     }
 
     // --- Centerline confirmation ---
-    if(bullishDivergence || bullishReversal)
+    if(bullishDivergence || bullishAlignment || bullishReversal)
     {
         if(InpUse_Centerline_Confirmation)
         {
@@ -372,7 +427,7 @@ void CheckForEntrySignals()
             bullishSignal = true;
     }
 
-    if(bearishDivergence || bearishReversal)
+    if(bearishDivergence || bearishAlignment || bearishReversal)
     {
         if(InpUse_Centerline_Confirmation)
         {
@@ -385,7 +440,7 @@ void CheckForEntrySignals()
             bearishSignal = true;
     }
 
-    // --- Slope divergence filter (FIX v2.2: called once, not redundantly) ---
+    // --- Slope divergence filter ---
     if(InpRequire_Slope_Divergence && (bullishSignal || bearishSignal))
     {
         bool bullishSlope, bearishSlope;
@@ -407,7 +462,7 @@ void CheckForEntrySignals()
         }
     }
 
-    // --- N-bar divergence confirmation (must update counters before early return) ---
+    // --- N-bar confirmation ---
     static int bullishCount = 0;
     static int bearishCount = 0;
     if(bullishSignal) bullishCount++; else bullishCount = 0;
@@ -418,13 +473,13 @@ void CheckForEntrySignals()
     if(bullishSignal && bullishCount < InpMinDivergenceBars)
     {
         if(InpVerboseEntryLogs)
-            PrintFormat("Bullish blocked: divergence confirmed %d/%d bars", bullishCount, InpMinDivergenceBars);
+            PrintFormat("Bullish blocked: signal confirmed %d/%d bars", bullishCount, InpMinDivergenceBars);
         return;
     }
     if(bearishSignal && bearishCount < InpMinDivergenceBars)
     {
         if(InpVerboseEntryLogs)
-            PrintFormat("Bearish blocked: divergence confirmed %d/%d bars", bearishCount, InpMinDivergenceBars);
+            PrintFormat("Bearish blocked: signal confirmed %d/%d bars", bearishCount, InpMinDivergenceBars);
         return;
     }
     bullishCount = 0;
@@ -459,14 +514,14 @@ void CheckForEntrySignals()
     {
         double sl = (InpStopLossPoints  > 0) ? price - InpStopLossPoints  * _Point : 0;
         double tp = (InpTakeProfitPoints > 0) ? price + InpTakeProfitPoints * _Point : 0;
-        if(!trade.Buy(lots, _Symbol, price, sl, tp, "TRE_Buy_v22"))
+        if(!trade.Buy(lots, _Symbol, price, sl, tp, "TRE_Buy_v23"))
             PrintFormat("Buy failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
     }
     else
     {
         double sl = (InpStopLossPoints  > 0) ? price + InpStopLossPoints  * _Point : 0;
         double tp = (InpTakeProfitPoints > 0) ? price - InpTakeProfitPoints * _Point : 0;
-        if(!trade.Sell(lots, _Symbol, price, sl, tp, "TRE_Sell_v22"))
+        if(!trade.Sell(lots, _Symbol, price, sl, tp, "TRE_Sell_v23"))
             PrintFormat("Sell failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
     }
 }
@@ -494,32 +549,42 @@ double CalculateLinearRegressionSlope(const double &values[], const int period)
 }
 
 //+------------------------------------------------------------------+
-//| Slope divergence filter                                          |
+//| Computes price and RSI slopes (shared utility)                   |
 //+------------------------------------------------------------------+
-bool EvaluateSlopeDivergence(bool &bullish, bool &bearish, double &priceSlope, double &rsiSlope)
+bool GetSlopes(double &priceSlope, double &rsiSlope)
 {
-    bullish    = false;
-    bearish    = false;
     priceSlope = 0.0;
     rsiSlope   = 0.0;
 
     const int period = GetSlopePeriod();
     double rsiValues[], closePrices[];
 
-    if(CopyBuffer(rsi_handle, 0, 1, period, rsiValues) < period)  return false;
+    if(CopyBuffer(rsi_handle, 0, 1, period, rsiValues) < period)    return false;
     if(CopyClose(_Symbol, _Period, 1, period, closePrices) < period) return false;
 
     rsiSlope   = CalculateLinearRegressionSlope(rsiValues,   period);
     priceSlope = CalculateLinearRegressionSlope(closePrices, period);
+    return true;
+}
 
-    // k=0 is most recent bar: price going DOWN over time = slope > 0, RSI going UP = slope < 0
+//+------------------------------------------------------------------+
+//| Slope divergence filter (wraps GetSlopes)                        |
+//+------------------------------------------------------------------+
+bool EvaluateSlopeDivergence(bool &bullish, bool &bearish, double &priceSlope, double &rsiSlope)
+{
+    bullish = false;
+    bearish = false;
+
+    if(!GetSlopes(priceSlope, rsiSlope)) return false;
+
+    // k=0 is most recent: price going DOWN = slope>0, RSI going UP = slope<0
     bullish = (priceSlope > 0.0 && rsiSlope < 0.0); // price down + RSI up = bullish div
     bearish = (priceSlope < 0.0 && rsiSlope > 0.0); // price up + RSI down = bearish div
     return true;
 }
 
 //+------------------------------------------------------------------+
-//| Manages currently open trades: RSI exit + slope alignment exit   |
+//| Manages currently open trades                                    |
 //+------------------------------------------------------------------+
 void ManageOpenTrades()
 {
@@ -535,30 +600,26 @@ void ManageOpenTrades()
         { trade.PositionClose(posInfo.Ticket()); return; }
     }
 
-    // --- Slope alignment exit ---
-    // BUY entered on price bearish (priceSlope>0): exit when price slope turns bullish (priceSlope<0)
-    // SELL entered on price bullish (priceSlope<0): exit when price slope turns bearish (priceSlope>0)
+    // --- [v2.3] Slope disalignment exit ---
+    // Exit as soon as ONE slope diverges from the trade direction.
+    // BUY was entered when both slopes were bullish (priceSlope<0, rsiSlope<0):
+    //   exit when priceSlope>0 OR rsiSlope>0 (one slope turns bearish)
+    // SELL was entered when both slopes were bearish (priceSlope>0, rsiSlope>0):
+    //   exit when priceSlope<0 OR rsiSlope<0 (one slope turns bullish)
     if(InpUse_Slope_Alignment_Exit)
     {
-        bool bullish, bearish;
         double ps, rs;
-        if(!EvaluateSlopeDivergence(bullish, bearish, ps, rs)) return;
+        if(!GetSlopes(ps, rs)) return;
 
         bool isBuy  = (posInfo.PositionType() == POSITION_TYPE_BUY);
         bool isSell = (posInfo.PositionType() == POSITION_TYPE_SELL);
 
-        // Profit exit: price inverted in expected direction
-        bool profitExitBuy  = isBuy  && ps < 0.0; // price turned bullish after being bearish
-        bool profitExitSell = isSell && ps > 0.0; // price turned bearish after being bullish
+        bool exitBuy  = isBuy  && (ps > 0.0 || rs > 0.0);
+        bool exitSell = isSell && (ps < 0.0 || rs < 0.0);
 
-        // Signal failed: both slopes aligned AGAINST the trade
-        bool failedBuy  = isBuy  && ps > 0.0 && rs > 0.0; // both bearish = BUY signal failed
-        bool failedSell = isSell && ps < 0.0 && rs < 0.0; // both bullish = SELL signal failed
-
-        if(profitExitBuy || profitExitSell || failedBuy || failedSell)
+        if(exitBuy || exitSell)
         {
-            string reason = (profitExitBuy || profitExitSell) ? "profit" : "signal failed";
-            PrintFormat("Slope exit (%s): priceSlope=%.8f rsiSlope=%.8f", reason, ps, rs);
+            PrintFormat("Slope disalignment exit: priceSlope=%.8f rsiSlope=%.8f", ps, rs);
             trade.PositionClose(posInfo.Ticket());
         }
     }
@@ -695,7 +756,6 @@ void ManageSessionEnd()
 
 //+------------------------------------------------------------------+
 //| Trailing Stop + Break-Even manager (runs every tick)             |
-//| FIX v2.2: break-even step added before trailing stop             |
 //+------------------------------------------------------------------+
 void ManageTrailingStop()
 {
