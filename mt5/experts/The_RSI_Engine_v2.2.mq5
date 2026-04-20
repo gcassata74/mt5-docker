@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025, The RSI Engine MT5 EA by SPLpluse"
 #property link      "https://splpulse.com"
-#property version   "2.2" // v2.2: Classic swing divergence + OB/OS zone filter + break-even stop
+#property version   "2.2" // v2.2: Classic swing divergence + OB/OS zone filter + break-even stop + EMA trend filter
 
 //--- Include the standard MQL5 trading library
 #include <Trade\Trade.mqh>
@@ -53,6 +53,8 @@ input bool   InpRequire_Slope_Divergence         = false; // Require opposite pr
 input int    InpSlope_Lookback_Bars              = 50;    // Slope lookback bars (linear regression)
 input int    InpMinDivergenceBars                = 1;     // Minimum consecutive bars with divergence before entry (1 = no filter)
 input bool   InpVerboseEntryLogs                 = true;  // Print detailed entry-block reasons
+input bool   InpUseTrendFilter                   = false; // Only trade in direction of EMA trend
+input int    InpTrendEMA_Period                  = 50;    // EMA period for trend filter
 
 //--- Daily Limits Group
 input group "Daily Limits (in Deposit Currency)"
@@ -86,6 +88,7 @@ CPositionInfo posInfo;
 CAccountInfo  account;
 CDealInfo     deal;
 int           rsi_handle;
+int           ema_handle;
 
 //--- Global state variables for limits
 datetime      g_last_limit_check_day = 0;
@@ -129,6 +132,16 @@ int OnInit()
         return(INIT_FAILED);
     }
 
+    if(InpUseTrendFilter)
+    {
+        ema_handle = iMA(_Symbol, _Period, InpTrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
+        if(ema_handle == INVALID_HANDLE)
+        {
+            Print("Error creating EMA indicator handle - ", GetLastError());
+            return(INIT_FAILED);
+        }
+    }
+
     if(InpUseRiskManagement && InpStopLossPoints <= 0)
     {
         Print("Error: Stop Loss must be > 0 for risk management. EA will not trade.");
@@ -147,6 +160,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
     IndicatorRelease(rsi_handle);
+    if(InpUseTrendFilter && ema_handle != INVALID_HANDLE) IndicatorRelease(ema_handle);
     Print("RSI Engine v2.2 deinitialized. Reason: ", reason);
 }
 
@@ -383,6 +397,28 @@ void CheckForEntrySignals()
         }
         else
             bearishSignal = true;
+    }
+
+    // --- EMA trend filter ---
+    if(InpUseTrendFilter && (bullishSignal || bearishSignal))
+    {
+        double ema_buf[1];
+        if(CopyBuffer(ema_handle, 0, 1, 1, ema_buf) > 0)
+        {
+            double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            if(bullishSignal && price < ema_buf[0])
+            {
+                if(InpVerboseEntryLogs)
+                    PrintFormat("Bullish blocked by trend filter: price %.5f < EMA%.0f %.5f", price, (double)InpTrendEMA_Period, ema_buf[0]);
+                bullishSignal = false;
+            }
+            if(bearishSignal && price > ema_buf[0])
+            {
+                if(InpVerboseEntryLogs)
+                    PrintFormat("Bearish blocked by trend filter: price %.5f > EMA%.0f %.5f", price, (double)InpTrendEMA_Period, ema_buf[0]);
+                bearishSignal = false;
+            }
+        }
     }
 
     // --- Slope divergence filter (FIX v2.2: called once, not redundantly) ---
