@@ -500,12 +500,12 @@ void ManageOpenTrades()
         bool isBuy  = (posInfo.PositionType() == POSITION_TYPE_BUY);
         bool isSell = (posInfo.PositionType() == POSITION_TYPE_SELL);
 
-        bool exitBuy  = isBuy  && (ps > 0.0 || rs > 0.0);
-        bool exitSell = isSell && (ps < 0.0 || rs < 0.0);
+        bool exitBuy  = isBuy  && ps > 0.0;
+        bool exitSell = isSell && ps < 0.0;
 
         if(exitBuy || exitSell)
         {
-            PrintFormat("Slope re-divergence exit: priceSlope=%.8f rsiSlope=%.8f", ps, rs);
+            PrintFormat("Price slope reversal exit: priceSlope=%.8f rsiSlope=%.8f", ps, rs);
             trade.PositionClose(posInfo.Ticket());
         }
     }
