@@ -1,4 +1,4 @@
-; USDCHF M5 - RSI Engine v2.4 (divergence → slope alignment → channel SL exit)
+; USDCHF M5 - RSI Engine v2.5 (divergence → slope alignment → RSI slope exit)
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1

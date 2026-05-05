@@ -91,6 +91,38 @@ bool          g_daily_limit_reached  = false;
 bool          g_saw_bullish_div  = false;
 bool          g_saw_bearish_div  = false;
 bool          g_was_in_position  = false;
+double        g_daily_pnl        = 0.0;
+datetime      g_daily_pnl_day    = 0;
+
+//+------------------------------------------------------------------+
+//| Accumulates closed trade P&L and prints running daily total      |
+//+------------------------------------------------------------------+
+void LogTradePnl(double profit)
+{
+    datetime today = StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
+    if(g_daily_pnl_day != today) { g_daily_pnl = 0.0; g_daily_pnl_day = today; }
+    g_daily_pnl += profit;
+    string cur = AccountInfoString(ACCOUNT_CURRENCY);
+    PrintFormat("[PNL] trade: %+.2f %s | day total: %+.2f %s",
+                profit, cur, g_daily_pnl, cur);
+}
+
+//+------------------------------------------------------------------+
+//| Returns profit+commission+swap of the most recently closed deal  |
+//+------------------------------------------------------------------+
+double GetLastDealProfit()
+{
+    if(!HistorySelect(TimeCurrent() - 86400, TimeCurrent())) return 0.0;
+    for(int i = (int)HistoryDealsTotal() - 1; i >= 0; i--)
+    {
+        if(!deal.SelectByIndex(i)) continue;
+        if(deal.Magic() != InpMagicNumber) continue;
+        if(deal.Symbol() != _Symbol) continue;
+        if(deal.Entry() != DEAL_ENTRY_OUT) continue;
+        return deal.Profit() + deal.Commission() + deal.Swap();
+    }
+    return 0.0;
+}
 
 //+------------------------------------------------------------------+
 //| Returns the period used for slope-based divergence               |
@@ -177,9 +209,11 @@ void OnTick()
                 else if(dealReason == DEAL_REASON_TP)  closeReason = "TAKE PROFIT hit";
                 else if(dealReason == DEAL_REASON_SO)  closeReason = "STOP OUT (margin)";
                 else                                   closeReason = "closed externally";
+                double extProfit = deal.Profit() + deal.Commission() + deal.Swap();
                 PrintFormat("[EXIT] %s -%s | profit: %+.2f %s | price: %.5f",
                             deal.Type() == DEAL_TYPE_BUY ? "SELL closed" : "BUY closed",
-                            closeReason, deal.Profit(), AccountInfoString(ACCOUNT_CURRENCY), deal.Price());
+                            closeReason, extProfit, AccountInfoString(ACCOUNT_CURRENCY), deal.Price());
+                LogTradePnl(extProfit);
                 break;
             }
         }
@@ -193,6 +227,7 @@ void OnTick()
     datetime currentBarTime = iTime(_Symbol, _Period, 0);
     if(lastBarTime == currentBarTime) return;
     lastBarTime = currentBarTime;
+
 
     if(IsPositionOpen()) return;
 
@@ -480,13 +515,13 @@ void ManageOpenTrades()
         {
             PrintFormat("[EXIT] BUY closed -RSI overbought (%.1f >= %d) | profit: %+.0f pts | open: %.5f close: %.5f",
                         rsi, InpRSI_Overbought, profitPts, openPrice, currentPrice);
-            trade.PositionClose(posInfo.Ticket()); return;
+            trade.PositionClose(posInfo.Ticket()); LogTradePnl(GetLastDealProfit()); return;
         }
         if(!isBuy && rsi <= InpRSI_Oversold)
         {
             PrintFormat("[EXIT] SELL closed -RSI oversold (%.1f <= %d) | profit: %+.0f pts | open: %.5f close: %.5f",
                         rsi, InpRSI_Oversold, profitPts, openPrice, currentPrice);
-            trade.PositionClose(posInfo.Ticket()); return;
+            trade.PositionClose(posInfo.Ticket()); LogTradePnl(GetLastDealProfit()); return;
         }
     }
 
@@ -510,7 +545,7 @@ void ManageOpenTrades()
         {
             PrintFormat("[EXIT] %s closed -RSI slope reversed (rs=%+.6f ps=%+.6f p=%d) | profit: %+.0f pts | open: %.5f close: %.5f",
                         isBuy ? "BUY" : "SELL", rs, ps, exitPeriod, profitPts, openPrice, currentPrice);
-            trade.PositionClose(posInfo.Ticket());
+            trade.PositionClose(posInfo.Ticket()); LogTradePnl(GetLastDealProfit());
             return;
         }
     }
@@ -536,7 +571,7 @@ void ManageOpenTrades()
                                 isBuy ? "< lower" : "> upper",
                                 isBuy ? lowerBand : upperBand,
                                 profitPts, openPrice);
-                    trade.PositionClose(posInfo.Ticket());
+                    trade.PositionClose(posInfo.Ticket()); LogTradePnl(GetLastDealProfit());
                     return;
                 }
             }
@@ -606,7 +641,7 @@ void ManageNewsClose()
         if(!posInfo.SelectByIndex(i)) continue;
         if(posInfo.Magic() != InpMagicNumber) continue;
         Print("Pre-news window: closing position #", posInfo.Ticket());
-        trade.PositionClose(posInfo.Ticket());
+        trade.PositionClose(posInfo.Ticket()); LogTradePnl(GetLastDealProfit());
     }
 }
 
@@ -712,8 +747,12 @@ void ManageSessionEnd()
             if(posInfo.SelectByIndex(i) && posInfo.Magic() == InpMagicNumber)
             {
                 Print("Session ended. Closing position #", posInfo.Ticket());
-                trade.PositionClose(posInfo.Ticket());
+                trade.PositionClose(posInfo.Ticket()); LogTradePnl(GetLastDealProfit());
             }
+        if(g_daily_pnl != 0.0)
+            PrintFormat("[PNL] === DAILY SUMMARY %s: %+.2f %s ===",
+                        TimeToString(TimeCurrent(), TIME_DATE), g_daily_pnl, AccountInfoString(ACCOUNT_CURRENCY));
+        g_daily_pnl = 0.0;
     }
     was_in_session = is_in_session;
 }
