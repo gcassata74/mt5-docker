@@ -19,6 +19,7 @@ services:
       - ./mt5/home/presets:/home/presets
       - "./mt5/experts:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Downloads"
       - "./mt5/indicators:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Downloads"
+      - "./mt5/logs:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Logs"
 
 volumes:
   mt5_config:

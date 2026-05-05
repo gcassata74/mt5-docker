@@ -1,34 +1,32 @@
-; USDCNH M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
-; Note: USDCNH spread elevato e liquidita' variabile - SL/TP piu' ampi
+; USDCNH M5 - RSI Engine v2.4 (divergence → slope alignment → channel SL exit)
+; Note: USDCNH exotic — wide spread, high volatility, wider channel multiplier
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=150
-InpTakeProfitPoints=450
+InpStopLossPoints=1500
+InpTakeProfitPoints=1200
 InpMagicNumber=190228
-InpMaxSpreadPoints=35
-InpUseTrailingStop=true
-InpUseBreakEven=true
-InpBreakEvenTrigger=20
-InpTrailingStopTrigger=30
-InpTrailingStopStep=10
-InpRSI_Period=9
-InpRSI_Overbought=100
-InpRSI_Oversold=0
-InpRSI_Centerline=50
-InpUse_Divergence_Signal=true
-InpUse_Classic_Divergence=false
-InpUse_OverboughtOversold_Reversal=false
-InpUse_Centerline_Confirmation=false
+InpMaxSpreadPoints=50
+InpUseTrailingStop=false
+InpUseBreakEven=false
+InpBreakEvenTrigger=700
+InpTrailingStopTrigger=1000
+InpTrailingStopStep=200
+InpRSI_Period=7
+InpRSI_Overbought=70
+InpRSI_Oversold=30
 InpUse_RSI_Level_Exit=false
 InpUse_Slope_Alignment_Exit=true
-InpDivergence_Lookback_Bars=40
-InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpSlope_Lookback_Bars=20
+InpEntry_Lookback_Bars=10
+InpUseChannelSL=true
+InpChannelSL_StdDevMul=2.5
+InpVerboseEntryLogs=false
 EnableDailyLimits=true
 DailyProfitTarget=120.0
 DailyLossLimit=240.0
 InpUseNewsFilter=false
+InpCloseBeforeNews=true
 InpNewsTimeHour=15
 InpNewsTimeMinute=30
 InpMinutesBeforeNews=30

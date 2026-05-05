@@ -1,34 +1,32 @@
-; EURJPY M5 - RSI Divergence Scalping (R:R 1.5:1 optimized)
-; Note: EURJPY alta volatilita' - SL/TP piu' ampi, lookback piu' corto
+; EURJPY M5 - RSI Engine v2.4 (divergence → slope alignment → channel SL exit)
+; Note: EURJPY high volatility — wider SL, wider channel multiplier
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=90
-InpTakeProfitPoints=270
+InpStopLossPoints=800
+InpTakeProfitPoints=700
 InpMagicNumber=190230
-InpMaxSpreadPoints=18
-InpUseTrailingStop=true
-InpUseBreakEven=true
-InpBreakEvenTrigger=20
-InpTrailingStopTrigger=30
-InpTrailingStopStep=10
+InpMaxSpreadPoints=25
+InpUseTrailingStop=false
+InpUseBreakEven=false
+InpBreakEvenTrigger=400
+InpTrailingStopTrigger=600
+InpTrailingStopStep=150
 InpRSI_Period=7
-InpRSI_Overbought=100
-InpRSI_Oversold=0
-InpRSI_Centerline=50
-InpUse_Divergence_Signal=true
-InpUse_Classic_Divergence=false
-InpUse_OverboughtOversold_Reversal=false
-InpUse_Centerline_Confirmation=false
+InpRSI_Overbought=70
+InpRSI_Oversold=30
 InpUse_RSI_Level_Exit=false
 InpUse_Slope_Alignment_Exit=true
-InpDivergence_Lookback_Bars=25
-InpRequire_Slope_Divergence=true
-InpSlope_Lookback_Bars=50
+InpSlope_Lookback_Bars=20
+InpEntry_Lookback_Bars=10
+InpUseChannelSL=true
+InpChannelSL_StdDevMul=2.5
+InpVerboseEntryLogs=false
 EnableDailyLimits=true
 DailyProfitTarget=190.0
 DailyLossLimit=380.0
-InpUseNewsFilter=false
+InpUseNewsFilter=true
+InpCloseBeforeNews=true
 InpNewsTimeHour=15
 InpNewsTimeMinute=30
 InpMinutesBeforeNews=30
