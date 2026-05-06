@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025, The RSI Engine MT5 EA by SPLpluse"
 #property link      "https://splpulse.com"
-#property version   "2.5" // v2.5: exit requires BOTH price slope AND RSI slope reversal (breathing room)
+#property version   "2.6" // v2.6: enter on alignment, exit on divergence, re-enter on re-alignment
 
 //--- Include the standard MQL5 trading library
 #include <Trade\Trade.mqh>
@@ -88,8 +88,6 @@ int           rsi_handle;
 datetime      g_last_limit_check_day = 0;
 bool          g_daily_limit_reached  = false;
 
-bool          g_saw_bullish_div  = false;
-bool          g_saw_bearish_div  = false;
 bool          g_was_in_position  = false;
 double        g_daily_pnl        = 0.0;
 datetime      g_daily_pnl_day    = 0;
@@ -217,8 +215,6 @@ void OnTick()
                 break;
             }
         }
-        g_saw_bullish_div = false;
-        g_saw_bearish_div = false;
     }
     g_was_in_position = now_in_position;
 
@@ -293,63 +289,35 @@ bool ComputeChannelBandSL(bool isBuy, double &slLevel)
 }
 
 //+------------------------------------------------------------------+
-//| Strategy: divergence → wait for alignment → decide via RSI slope|
-//| Step 1: detect divergence (price and RSI opposite) on long window|
-//| Step 2: wait for alignment (both same direction) on short window |
-//| Step 3: RSI slope up → BUY, RSI slope down → SELL               |
+//| v2.6 Strategy: enter when price+RSI aligned, exit on divergence |
+//| Entry: both slopes same direction (no divergence prerequisite)   |
+//| Exit:  slopes diverge (opposite directions) → momentum fading   |
+//| Re-entry: slopes re-align after divergence exit                  |
 //+------------------------------------------------------------------+
 void EvaluateSlopeAlignmentCycle(bool &bullishEntry, bool &bearishEntry)
 {
     bullishEntry = false;
     bearishEntry = false;
 
-    // Step 1: detect divergence on stable long window
-    bool bullish, bearish;
-    double ps, rs;
-    if(!EvaluateSlopeDivergence(bullish, bearish, ps, rs)) return;
-
-    double rsi1 = GetRSI(1);
-    if(bullish) {
-        if(!g_saw_bullish_div)
-            PrintFormat("[DIV] BULLISH | price slope: %+.6f (dn) | RSI slope: %+.6f (up) | RSI: %.1f | p=%d",
-                        ps, rs, rsi1, GetSlopePeriod());
-        g_saw_bullish_div = true;
-        g_saw_bearish_div = false;
-    }
-    if(bearish) {
-        if(!g_saw_bearish_div)
-            PrintFormat("[DIV] BEARISH | price slope: %+.6f (up) | RSI slope: %+.6f (dn) | RSI: %.1f | p=%d",
-                        ps, rs, rsi1, GetSlopePeriod());
-        g_saw_bearish_div = true;
-        g_saw_bullish_div = false;
-    }
-
-    if(!g_saw_bullish_div && !g_saw_bearish_div) return;
-
-    // Step 2: wait for alignment on short responsive window
-    int entryPeriod = (InpEntry_Lookback_Bars > 2) ? InpEntry_Lookback_Bars : GetSlopePeriod();
     bool dummy1, dummy2;
     double eps, ers;
-    if(!EvaluateSlopeDivergence(dummy1, dummy2, eps, ers, entryPeriod)) return;
+    int period = GetSlopePeriod(); // use stable 20-bar window for entries
+    if(!EvaluateSlopeDivergence(dummy1, dummy2, eps, ers, period)) return;
 
     if(InpVerboseEntryLogs)
-        PrintFormat("[WAIT] div=%s | entry slope(p=%d): ps=%+.6f rs=%+.6f",
-                    g_saw_bullish_div ? "bull" : "bear", entryPeriod, eps, ers);
+        PrintFormat("[SLOPE] price=%+.6f rsi=%+.6f (p=%d)", eps, ers, period);
 
-    // Step 3: slopes aligned — decide by RSI slope direction
-    if(g_saw_bullish_div && eps > 0.0 && ers > 0.0)
+    if(eps > 0.0 && ers > 0.0)
     {
         bullishEntry = true;
-        g_saw_bullish_div = false;
-        PrintFormat("[ALIGN] BUY | RSI slope up (%+.6f) | price slope (%+.6f) | RSI: %.1f",
-                    ers, eps, rsi1);
+        PrintFormat("[ALIGN] BUY | price slope: %+.6f | RSI slope: %+.6f | RSI: %.1f",
+                    eps, ers, GetRSI(1));
     }
-    else if(g_saw_bearish_div && eps < 0.0 && ers < 0.0)
+    else if(eps < 0.0 && ers < 0.0)
     {
         bearishEntry = true;
-        g_saw_bearish_div = false;
-        PrintFormat("[ALIGN] SELL | RSI slope dn (%+.6f) | price slope (%+.6f) | RSI: %.1f",
-                    ers, eps, rsi1);
+        PrintFormat("[ALIGN] SELL | price slope: %+.6f | RSI slope: %+.6f | RSI: %.1f",
+                    eps, ers, GetRSI(1));
     }
 }
 
@@ -529,22 +497,18 @@ void ManageOpenTrades()
     // Price-only wiggles that RSI doesn't confirm are ignored; SL is the backstop.
     if(InpUse_Slope_Alignment_Exit)
     {
-        int exitPeriod = (InpEntry_Lookback_Bars > 2) ? InpEntry_Lookback_Bars : GetSlopePeriod();
+        // v2.6: exit when price slope and RSI slope DIVERGE (opposite directions)
+        // While both are aligned we stay in — momentum is intact.
+        // Divergence = momentum fading: one slope has turned against the trade.
         bool bullish, bearish;
         double ps, rs;
-        if(!EvaluateSlopeDivergence(bullish, bearish, ps, rs, exitPeriod)) return;
+        if(!EvaluateSlopeDivergence(bullish, bearish, ps, rs, GetSlopePeriod())) return;
 
-        // RSI leads price: exit when RSI slope reverses, even if price hasn't turned yet.
-        // Slope formula gives NEGATIVE values for downtrends (k=0 = most recent bar).
-        // BUY: RSI going down (rs<0) means momentum fading — get out before price turns
-        // SELL: RSI going up  (rs>0) means momentum fading — get out before price turns
-        bool exitBuy  = isBuy  && rs < 0.0;
-        bool exitSell = !isBuy && rs > 0.0;
-
-        if(exitBuy || exitSell)
+        bool divergence = (ps * rs < 0.0); // opposite signs = divergence
+        if(divergence)
         {
-            PrintFormat("[EXIT] %s closed -RSI slope reversed (rs=%+.6f ps=%+.6f p=%d) | profit: %+.0f pts | open: %.5f close: %.5f",
-                        isBuy ? "BUY" : "SELL", rs, ps, exitPeriod, profitPts, openPrice, currentPrice);
+            PrintFormat("[EXIT] %s closed -divergence (ps=%+.6f rs=%+.6f p=%d) | profit: %+.0f pts | open: %.5f close: %.5f",
+                        isBuy ? "BUY" : "SELL", ps, rs, GetSlopePeriod(), profitPts, openPrice, currentPrice);
             trade.PositionClose(posInfo.Ticket()); LogTradePnl(GetLastDealProfit());
             return;
         }
