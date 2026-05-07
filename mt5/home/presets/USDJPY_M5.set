@@ -1,21 +1,16 @@
-; USDJPY M5 - RSI Engine v2.2 (RSI mean reversion scalping)
+; USDJPY M5 - RSI Engine v2.2 (RSI(2) fast scalping, many trades)
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=300
-InpTakeProfitPoints=450
+InpStopLossPoints=200
+InpTakeProfitPoints=150
 InpMagicNumber=220005
-InpMaxSpreadPoints=20
-InpUseBreakEven=true
-InpBreakEvenTrigger=150
-InpUseTrailingStop=true
-InpTrailingStopTrigger=250
-InpTrailingStopStep=100
-InpRSI_Period=7
-InpRSI_Overbought=70
-InpRSI_Oversold=30
+InpMaxSpreadPoints=12
+InpRSI_Period=2
+InpRSI_Overbought=90
+InpRSI_Oversold=10
 InpUseEMAFilter=true
-InpEMA_Period=50
+InpEMA_Period=200
 InpVerboseLogs=true
 EnableDailyLimits=true
 DailyProfitTarget=300.0

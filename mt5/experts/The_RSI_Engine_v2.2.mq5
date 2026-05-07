@@ -6,10 +6,10 @@
 #property copyright "Copyright 2025, The RSI Engine MT5 EA by SPLpluse"
 #property link      "https://splpulse.com"
 #property version   "2.2"
-// v2.2 strategy: RSI mean reversion scalping
-//   Entry: RSI crosses back from OB/OS zone (oversold bounce → BUY, overbought drop → SELL)
-//   Filter: optional EMA50 trend filter (only buy above EMA, only sell below EMA)
-//   Exit:   fixed TP, break-even then trailing stop
+// v2.2 strategy: RSI(2) fast scalping — many small trades
+//   Entry: RSI(2) crosses back from extreme zone (< 10 oversold → BUY, > 90 overbought → SELL)
+//   Filter: optional EMA200 trend filter (only buy above EMA, only sell below EMA)
+//   Exit:   fixed tight TP (15 pips), fixed SL (20 pips) — no trailing (targets too tight)
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -21,30 +21,22 @@ input group "Trade Management"
 input bool   InpUseRiskManagement = false;  // Use dynamic lot sizing based on risk %?
 input double InpRiskPercent       = 1.0;    // Risk % of equity per trade (if enabled)
 input double InpLots              = 0.1;    // Fixed lot size
-input int    InpStopLossPoints    = 300;    // Stop Loss in points
-input int    InpTakeProfitPoints  = 450;    // Take Profit in points (default 1:1.5 ratio)
+input int    InpStopLossPoints    = 200;    // Stop Loss in points (20 pips)
+input int    InpTakeProfitPoints  = 150;    // Take Profit in points (15 pips)
 input ulong  InpMagicNumber       = 2200;   // Unique EA ID
-input int    InpMaxSpreadPoints   = 20;     // Max spread allowed for entry
-
-//--- Break-Even & Trailing Stop
-input group "Break-Even & Trailing Stop"
-input bool   InpUseBreakEven         = true;  // Move SL to break-even?
-input int    InpBreakEvenTrigger     = 150;   // Profit in points to trigger break-even
-input bool   InpUseTrailingStop      = true;  // Enable trailing stop?
-input int    InpTrailingStopTrigger  = 250;   // Profit in points to start trailing
-input int    InpTrailingStopStep     = 100;   // Trailing distance from price in points
+input int    InpMaxSpreadPoints   = 10;     // Max spread allowed for entry (tight for scalping)
 
 //--- RSI Settings
 input group "RSI Settings"
-input int    InpRSI_Period      = 7;   // RSI period
-input int    InpRSI_Overbought  = 70;  // Overbought level
-input int    InpRSI_Oversold    = 30;  // Oversold level
+input int    InpRSI_Period      = 2;   // RSI period (2 = ultra-fast, many signals)
+input int    InpRSI_Overbought  = 90;  // Overbought level
+input int    InpRSI_Oversold    = 10;  // Oversold level
 
 //--- Strategy Filters
 input group "Strategy Filters"
-input bool   InpUseEMAFilter   = true;  // Only buy above EMA, only sell below EMA?
-input int    InpEMA_Period     = 50;    // EMA period for trend filter
-input bool   InpVerboseLogs    = true;  // Print detailed logs
+input bool   InpUseEMAFilter   = true;   // Only buy above EMA, only sell below EMA?
+input int    InpEMA_Period     = 200;    // EMA period for trend filter
+input bool   InpVerboseLogs    = true;   // Print detailed logs
 
 //--- Daily Limits
 input group "Daily Limits (deposit currency)"
@@ -295,68 +287,9 @@ bool IsPositionOpen()
 }
 
 //+------------------------------------------------------------------+
-void ManageTrailingStop()
-{
-    if(!InpUseTrailingStop || InpTrailingStopTrigger <= 0 || InpTrailingStopStep <= 0) return;
-
-    int bePoints = (InpUseBreakEven && InpBreakEvenTrigger > 0) ? InpBreakEvenTrigger : InpStopLossPoints;
-
-    for(int i = PositionsTotal() - 1; i >= 0; i--)
-    {
-        if(!posInfo.SelectByIndex(i)) continue;
-        if(posInfo.Magic()  != InpMagicNumber) continue;
-        if(posInfo.Symbol() != _Symbol)        continue;
-
-        double openPrice = posInfo.PriceOpen();
-        double currentSL = posInfo.StopLoss();
-        ulong  ticket    = posInfo.Ticket();
-
-        if(posInfo.PositionType() == POSITION_TYPE_BUY)
-        {
-            double bid      = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-            double profitPts = (bid - openPrice) / _Point;
-
-            if(InpUseBreakEven && profitPts >= bePoints && currentSL < openPrice)
-            {
-                double spread = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - bid) / _Point;
-                double beSL   = openPrice + (spread + 2) * _Point;
-                if(beSL > currentSL)
-                {
-                    trade.PositionModify(ticket, beSL, posInfo.TakeProfit());
-                    PrintFormat("Break-even set at %.5f (profit: %.1f pts)", beSL, profitPts);
-                }
-            }
-            if(profitPts >= InpTrailingStopTrigger)
-            {
-                double newSL = bid - InpTrailingStopStep * _Point;
-                if((newSL > currentSL || currentSL == 0) && newSL > openPrice)
-                    trade.PositionModify(ticket, newSL, posInfo.TakeProfit());
-            }
-        }
-        else if(posInfo.PositionType() == POSITION_TYPE_SELL)
-        {
-            double ask      = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-            double profitPts = (openPrice - ask) / _Point;
-
-            if(InpUseBreakEven && profitPts >= bePoints && (currentSL > openPrice || currentSL == 0))
-            {
-                double spread = (ask - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
-                double beSL   = openPrice - (spread + 2) * _Point;
-                if(beSL < currentSL || currentSL == 0)
-                {
-                    trade.PositionModify(ticket, beSL, posInfo.TakeProfit());
-                    PrintFormat("Break-even set at %.5f (profit: %.1f pts)", beSL, profitPts);
-                }
-            }
-            if(profitPts >= InpTrailingStopTrigger)
-            {
-                double newSL = ask + InpTrailingStopStep * _Point;
-                if((newSL < currentSL || currentSL == 0) && newSL < openPrice)
-                    trade.PositionModify(ticket, newSL, posInfo.TakeProfit());
-            }
-        }
-    }
-}
+// No trailing stop for RSI(2) scalping — TP/SL targets are too tight (15/20 pips).
+// Broker handles TP/SL execution directly.
+void ManageTrailingStop() { }
 
 //+------------------------------------------------------------------+
 bool IsDailyLimitReached()
