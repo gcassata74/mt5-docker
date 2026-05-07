@@ -1,0 +1,525 @@
+//+------------------------------------------------------------------+
+//|                                       The_RSI_Engine_v2.2.mq5   |
+//|                                      Copyright 2025, SPLpulse   |
+//|                                           https://splpulse.com  |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2025, The RSI Engine MT5 EA by SPLpluse"
+#property link      "https://splpulse.com"
+#property version   "2.2"
+// v2.2 strategy: RSI mean reversion scalping
+//   Entry: RSI crosses back from OB/OS zone (oversold bounce → BUY, overbought drop → SELL)
+//   Filter: optional EMA50 trend filter (only buy above EMA, only sell below EMA)
+//   Exit:   fixed TP, break-even then trailing stop
+
+#include <Trade\Trade.mqh>
+#include <Trade\PositionInfo.mqh>
+#include <Trade\AccountInfo.mqh>
+#include <Trade\DealInfo.mqh>
+
+//--- Trade Management
+input group "Trade Management"
+input bool   InpUseRiskManagement = false;  // Use dynamic lot sizing based on risk %?
+input double InpRiskPercent       = 1.0;    // Risk % of equity per trade (if enabled)
+input double InpLots              = 0.1;    // Fixed lot size
+input int    InpStopLossPoints    = 300;    // Stop Loss in points
+input int    InpTakeProfitPoints  = 450;    // Take Profit in points (default 1:1.5 ratio)
+input ulong  InpMagicNumber       = 2200;   // Unique EA ID
+input int    InpMaxSpreadPoints   = 20;     // Max spread allowed for entry
+
+//--- Break-Even & Trailing Stop
+input group "Break-Even & Trailing Stop"
+input bool   InpUseBreakEven         = true;  // Move SL to break-even?
+input int    InpBreakEvenTrigger     = 150;   // Profit in points to trigger break-even
+input bool   InpUseTrailingStop      = true;  // Enable trailing stop?
+input int    InpTrailingStopTrigger  = 250;   // Profit in points to start trailing
+input int    InpTrailingStopStep     = 100;   // Trailing distance from price in points
+
+//--- RSI Settings
+input group "RSI Settings"
+input int    InpRSI_Period      = 7;   // RSI period
+input int    InpRSI_Overbought  = 70;  // Overbought level
+input int    InpRSI_Oversold    = 30;  // Oversold level
+
+//--- Strategy Filters
+input group "Strategy Filters"
+input bool   InpUseEMAFilter   = true;  // Only buy above EMA, only sell below EMA?
+input int    InpEMA_Period     = 50;    // EMA period for trend filter
+input bool   InpVerboseLogs    = true;  // Print detailed logs
+
+//--- Daily Limits
+input group "Daily Limits (deposit currency)"
+input bool   EnableDailyLimits  = true;    // Enable daily profit/loss limits?
+input double DailyProfitTarget  = 300.0;   // Stop trading when daily profit reaches this
+input double DailyLossLimit     = 150.0;   // Stop trading when daily loss reaches this
+
+//--- News Filter
+input group "News Filter (Server Time)"
+input bool   InpUseNewsFilter      = false;  // Enable news filter?
+input bool   InpCloseBeforeNews    = true;   // Close position before news window?
+input int    InpNewsTimeHour       = 15;     // News hour
+input int    InpNewsTimeMinute     = 30;     // News minute
+input int    InpMinutesBeforeNews  = 30;     // Minutes before news to stop trading
+input int    InpMinutesAfterNews   = 30;     // Minutes after news to resume
+
+//--- Trading Hours
+input group "Trading Hours (Server Time)"
+input bool   EnableTimeFilter  = true;                       // Enable time filter?
+input string MondayHours       = "09:00-12:00;14:00-21:00";
+input string TuesdayHours      = "09:00-12:00;14:00-21:00";
+input string WednesdayHours    = "09:00-12:00;14:00-21:00";
+input string ThursdayHours     = "09:00-12:00;14:00-21:00";
+input string FridayHours       = "09:00-12:00;14:00-20:00";
+input string SaturdayHours     = "00:00-00:00";
+input string SundayHours       = "00:00-00:00";
+input bool   CloseAtEndTime    = true;  // Close positions when session ends?
+
+//--- Globals
+CTrade        trade;
+CPositionInfo posInfo;
+CAccountInfo  account;
+CDealInfo     deal;
+
+int      rsi_handle;
+int      ema_handle;
+bool     g_daily_limit_reached  = false;
+datetime g_last_limit_check_day = 0;
+bool     g_was_in_position      = false;
+double   g_daily_pnl            = 0.0;
+datetime g_daily_pnl_day        = 0;
+
+//+------------------------------------------------------------------+
+double GetRSI(int shift)
+{
+    double buf[1];
+    if(CopyBuffer(rsi_handle, 0, shift, 1, buf) > 0) return buf[0];
+    return -1;
+}
+
+double GetEMA(int shift)
+{
+    double buf[1];
+    if(CopyBuffer(ema_handle, 0, shift, 1, buf) > 0) return buf[0];
+    return -1;
+}
+
+//+------------------------------------------------------------------+
+void LogTradePnl(double profit)
+{
+    datetime today = StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
+    if(g_daily_pnl_day != today) { g_daily_pnl = 0.0; g_daily_pnl_day = today; }
+    g_daily_pnl += profit;
+    string cur = AccountInfoString(ACCOUNT_CURRENCY);
+    PrintFormat("[PNL] trade: %+.2f %s | day total: %+.2f %s",
+                profit, cur, g_daily_pnl, cur);
+}
+
+double GetLastDealProfit()
+{
+    if(!HistorySelect(TimeCurrent() - 86400, TimeCurrent())) return 0.0;
+    for(int i = (int)HistoryDealsTotal() - 1; i >= 0; i--)
+    {
+        if(!deal.SelectByIndex(i)) continue;
+        if(deal.Magic()  != InpMagicNumber) continue;
+        if(deal.Symbol() != _Symbol)        continue;
+        if(deal.Entry()  != DEAL_ENTRY_OUT) continue;
+        return deal.Profit() + deal.Commission() + deal.Swap();
+    }
+    return 0.0;
+}
+
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    trade.SetExpertMagicNumber(InpMagicNumber);
+    trade.SetDeviationInPoints(10);
+    trade.SetTypeFillingBySymbol(_Symbol);
+
+    rsi_handle = iRSI(_Symbol, _Period, InpRSI_Period, PRICE_CLOSE);
+    if(rsi_handle == INVALID_HANDLE) { Print("RSI handle failed"); return INIT_FAILED; }
+
+    ema_handle = iMA(_Symbol, _Period, InpEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
+    if(ema_handle == INVALID_HANDLE) { Print("EMA handle failed"); return INIT_FAILED; }
+
+    PrintFormat("RSI Engine v2.2 initialized | RSI(%d) OB=%d OS=%d | EMA filter=%s | SL=%d TP=%d pts",
+                InpRSI_Period, InpRSI_Overbought, InpRSI_Oversold,
+                InpUseEMAFilter ? "ON" : "OFF",
+                InpStopLossPoints, InpTakeProfitPoints);
+    return INIT_SUCCEEDED;
+}
+
+void OnDeinit(const int reason)
+{
+    IndicatorRelease(rsi_handle);
+    IndicatorRelease(ema_handle);
+    Print("RSI Engine v2.2 deinitialized. Reason: ", reason);
+}
+
+//+------------------------------------------------------------------+
+void OnTick()
+{
+    ManageSessionEnd();
+    ManageNewsClose();
+    ManageTrailingStop();
+
+    bool now_in_position = IsPositionOpen();
+
+    // Detect external close (SL, TP, manual)
+    if(g_was_in_position && !now_in_position)
+    {
+        if(HistorySelect(TimeCurrent() - 86400, TimeCurrent()))
+        {
+            for(int i = (int)HistoryDealsTotal() - 1; i >= 0; i--)
+            {
+                if(!deal.SelectByIndex(i)) continue;
+                if(deal.Magic() != InpMagicNumber) continue;
+                if(deal.Symbol() != _Symbol)       continue;
+                if(deal.Entry()  != DEAL_ENTRY_OUT) continue;
+                long   reason     = HistoryDealGetInteger(deal.Ticket(), DEAL_REASON);
+                string closeDesc  = (reason == DEAL_REASON_SL) ? "STOP LOSS" :
+                                    (reason == DEAL_REASON_TP) ? "TAKE PROFIT" : "closed externally";
+                double extProfit  = deal.Profit() + deal.Commission() + deal.Swap();
+                PrintFormat("[EXIT] %s | %s | profit: %+.2f %s | price: %.5f",
+                            deal.Type() == DEAL_TYPE_SELL ? "BUY closed" : "SELL closed",
+                            closeDesc, extProfit, AccountInfoString(ACCOUNT_CURRENCY), deal.Price());
+                LogTradePnl(extProfit);
+                break;
+            }
+        }
+    }
+    g_was_in_position = now_in_position;
+
+    // Once per bar
+    static datetime lastBar = 0;
+    datetime curBar = iTime(_Symbol, _Period, 0);
+    if(lastBar == curBar) return;
+    lastBar = curBar;
+
+    if(IsPositionOpen()) return;
+
+    double spread = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
+    if(spread > InpMaxSpreadPoints)
+    {
+        if(InpVerboseLogs) PrintFormat("Entry blocked: spread %.1f > %d pts", spread, InpMaxSpreadPoints);
+        return;
+    }
+
+    CheckForEntrySignals();
+}
+
+//+------------------------------------------------------------------+
+// v2.2 Entry: RSI crosses back from OB/OS zone
+//   BUY:  previous bar RSI was below InpRSI_Oversold, current bar RSI crossed back above it
+//   SELL: previous bar RSI was above InpRSI_Overbought, current bar RSI crossed back below it
+//+------------------------------------------------------------------+
+void CheckForEntrySignals()
+{
+    if(IsDailyLimitReached())
+    {
+        if(InpVerboseLogs) Print("Entry blocked: daily limit reached.");
+        return;
+    }
+    if(!IsWithinTradingHours())
+    {
+        if(InpVerboseLogs) Print("Entry blocked: outside trading hours.");
+        return;
+    }
+    if(IsNewsTimeRestricted())
+    {
+        if(InpVerboseLogs) Print("Entry blocked: news filter.");
+        return;
+    }
+
+    double rsi1 = GetRSI(1); // last closed bar
+    double rsi2 = GetRSI(2); // bar before that
+    if(rsi1 < 0 || rsi2 < 0) return;
+
+    // RSI crosses back from oversold → BUY
+    bool buySignal  = (rsi2 < InpRSI_Oversold  && rsi1 >= InpRSI_Oversold);
+    // RSI crosses back from overbought → SELL
+    bool sellSignal = (rsi2 > InpRSI_Overbought && rsi1 <= InpRSI_Overbought);
+
+    if(!buySignal && !sellSignal) return;
+
+    // EMA trend filter
+    if(InpUseEMAFilter)
+    {
+        double ema = GetEMA(1);
+        double price = iClose(_Symbol, _Period, 1);
+        if(ema < 0) return;
+
+        if(buySignal  && price < ema)
+        {
+            if(InpVerboseLogs) PrintFormat("Entry blocked: BUY signal but price (%.5f) below EMA (%.5f)", price, ema);
+            buySignal = false;
+        }
+        if(sellSignal && price > ema)
+        {
+            if(InpVerboseLogs) PrintFormat("Entry blocked: SELL signal but price (%.5f) above EMA (%.5f)", price, ema);
+            sellSignal = false;
+        }
+        if(!buySignal && !sellSignal) return;
+    }
+
+    double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+    if(lots <= 0) return;
+
+    if(buySignal)
+    {
+        double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        double sl  = (InpStopLossPoints   > 0) ? ask - InpStopLossPoints   * _Point : 0;
+        double tp  = (InpTakeProfitPoints > 0) ? ask + InpTakeProfitPoints * _Point : 0;
+        PrintFormat("[ENTRY] BUY @ %.5f | RSI: %.1f→%.1f | SL: %.5f | TP: %.5f | lots: %.2f",
+                    ask, rsi2, rsi1, sl, tp, lots);
+        if(!trade.Buy(lots, _Symbol, ask, sl, tp, "TRE_v22_Buy"))
+            PrintFormat("[ENTRY] BUY failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+    }
+    else
+    {
+        double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+        double sl  = (InpStopLossPoints   > 0) ? bid + InpStopLossPoints   * _Point : 0;
+        double tp  = (InpTakeProfitPoints > 0) ? bid - InpTakeProfitPoints * _Point : 0;
+        PrintFormat("[ENTRY] SELL @ %.5f | RSI: %.1f→%.1f | SL: %.5f | TP: %.5f | lots: %.2f",
+                    bid, rsi2, rsi1, sl, tp, lots);
+        if(!trade.Sell(lots, _Symbol, bid, sl, tp, "TRE_v22_Sell"))
+            PrintFormat("[ENTRY] SELL failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+    }
+}
+
+//+------------------------------------------------------------------+
+bool IsPositionOpen()
+{
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+        if(posInfo.SelectByIndex(i) && posInfo.Magic() == InpMagicNumber && posInfo.Symbol() == _Symbol)
+            return true;
+    return false;
+}
+
+//+------------------------------------------------------------------+
+void ManageTrailingStop()
+{
+    if(!InpUseTrailingStop || InpTrailingStopTrigger <= 0 || InpTrailingStopStep <= 0) return;
+
+    int bePoints = (InpUseBreakEven && InpBreakEvenTrigger > 0) ? InpBreakEvenTrigger : InpStopLossPoints;
+
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        if(!posInfo.SelectByIndex(i)) continue;
+        if(posInfo.Magic()  != InpMagicNumber) continue;
+        if(posInfo.Symbol() != _Symbol)        continue;
+
+        double openPrice = posInfo.PriceOpen();
+        double currentSL = posInfo.StopLoss();
+        ulong  ticket    = posInfo.Ticket();
+
+        if(posInfo.PositionType() == POSITION_TYPE_BUY)
+        {
+            double bid      = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            double profitPts = (bid - openPrice) / _Point;
+
+            if(InpUseBreakEven && profitPts >= bePoints && currentSL < openPrice)
+            {
+                double spread = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - bid) / _Point;
+                double beSL   = openPrice + (spread + 2) * _Point;
+                if(beSL > currentSL)
+                {
+                    trade.PositionModify(ticket, beSL, posInfo.TakeProfit());
+                    PrintFormat("Break-even set at %.5f (profit: %.1f pts)", beSL, profitPts);
+                }
+            }
+            if(profitPts >= InpTrailingStopTrigger)
+            {
+                double newSL = bid - InpTrailingStopStep * _Point;
+                if((newSL > currentSL || currentSL == 0) && newSL > openPrice)
+                    trade.PositionModify(ticket, newSL, posInfo.TakeProfit());
+            }
+        }
+        else if(posInfo.PositionType() == POSITION_TYPE_SELL)
+        {
+            double ask      = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            double profitPts = (openPrice - ask) / _Point;
+
+            if(InpUseBreakEven && profitPts >= bePoints && (currentSL > openPrice || currentSL == 0))
+            {
+                double spread = (ask - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
+                double beSL   = openPrice - (spread + 2) * _Point;
+                if(beSL < currentSL || currentSL == 0)
+                {
+                    trade.PositionModify(ticket, beSL, posInfo.TakeProfit());
+                    PrintFormat("Break-even set at %.5f (profit: %.1f pts)", beSL, profitPts);
+                }
+            }
+            if(profitPts >= InpTrailingStopTrigger)
+            {
+                double newSL = ask + InpTrailingStopStep * _Point;
+                if((newSL < currentSL || currentSL == 0) && newSL < openPrice)
+                    trade.PositionModify(ticket, newSL, posInfo.TakeProfit());
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+bool IsDailyLimitReached()
+{
+    if(!EnableDailyLimits) return false;
+
+    MqlDateTime dt;
+    TimeToStruct(TimeCurrent(), dt);
+    datetime dayStart = StructToTime(dt) - (dt.hour * 3600 + dt.min * 60 + dt.sec);
+
+    if(g_last_limit_check_day != dayStart)
+    {
+        g_last_limit_check_day = dayStart;
+        g_daily_limit_reached  = false;
+    }
+    if(g_daily_limit_reached) return true;
+
+    double profit = 0;
+    if(HistorySelect(dayStart, TimeCurrent()))
+        for(int i = 0; i < (int)HistoryDealsTotal(); i++)
+            if(deal.SelectByIndex(i) && deal.Magic() == InpMagicNumber)
+                profit += deal.Profit() + deal.Commission() + deal.Swap();
+
+    if(posInfo.SelectByMagic(_Symbol, InpMagicNumber))
+        profit += posInfo.Profit();
+
+    if(profit >= DailyProfitTarget)
+    {
+        PrintFormat("[LIMIT] Daily profit target %.2f reached. Stopping.", DailyProfitTarget);
+        g_daily_limit_reached = true; return true;
+    }
+    if(profit <= -DailyLossLimit)
+    {
+        PrintFormat("[LIMIT] Daily loss limit %.2f reached. Stopping.", DailyLossLimit);
+        g_daily_limit_reached = true; return true;
+    }
+    return false;
+}
+
+//+------------------------------------------------------------------+
+bool IsWithinTradingHours()
+{
+    if(!EnableTimeFilter) return true;
+
+    MqlDateTime t;
+    TimeToStruct(TimeCurrent(), t);
+    int nowMin = t.hour * 60 + t.min;
+
+    string hours = "";
+    switch(t.day_of_week)
+    {
+        case 0: hours = SundayHours;    break;
+        case 1: hours = MondayHours;    break;
+        case 2: hours = TuesdayHours;   break;
+        case 3: hours = WednesdayHours; break;
+        case 4: hours = ThursdayHours;  break;
+        case 5: hours = FridayHours;    break;
+        case 6: hours = SaturdayHours;  break;
+    }
+
+    string sessions[];
+    int n = StringSplit(hours, ';', sessions);
+    for(int i = 0; i < n; i++)
+    {
+        string times[];
+        if(StringSplit(sessions[i], '-', times) != 2) continue;
+        string sp[], ep[];
+        if(StringSplit(times[0], ':', sp) != 2) continue;
+        if(StringSplit(times[1], ':', ep) != 2) continue;
+        int start = (int)(StringToInteger(sp[0]) * 60 + StringToInteger(sp[1]));
+        int end   = (int)(StringToInteger(ep[0]) * 60 + StringToInteger(ep[1]));
+        if(nowMin >= start && nowMin < end) return true;
+    }
+    return false;
+}
+
+//+------------------------------------------------------------------+
+void ManageSessionEnd()
+{
+    if(!CloseAtEndTime) return;
+
+    static bool wasInSession = true;
+    bool isInSession = IsWithinTradingHours();
+
+    if(wasInSession && !isInSession)
+    {
+        for(int i = PositionsTotal() - 1; i >= 0; i--)
+            if(posInfo.SelectByIndex(i) && posInfo.Magic() == InpMagicNumber)
+            {
+                Print("Session ended. Closing position #", posInfo.Ticket());
+                trade.PositionClose(posInfo.Ticket());
+                LogTradePnl(GetLastDealProfit());
+            }
+        if(g_daily_pnl != 0.0)
+            PrintFormat("[PNL] === DAILY SUMMARY %s: %+.2f %s ===",
+                        TimeToString(TimeCurrent(), TIME_DATE), g_daily_pnl,
+                        AccountInfoString(ACCOUNT_CURRENCY));
+        g_daily_pnl = 0.0;
+    }
+    wasInSession = isInSession;
+}
+
+//+------------------------------------------------------------------+
+bool IsNewsTimeRestricted()
+{
+    if(!InpUseNewsFilter) return false;
+
+    datetime now = TimeCurrent();
+    MqlDateTime ts;
+    TimeToStruct(now, ts);
+    ts.hour = InpNewsTimeHour; ts.min = InpNewsTimeMinute; ts.sec = 0;
+    datetime newsTime = StructToTime(ts);
+    datetime noStart  = (datetime)(newsTime - (long)InpMinutesBeforeNews * 60);
+    datetime noEnd    = (datetime)(newsTime + (long)InpMinutesAfterNews  * 60);
+    return (now >= noStart && now < noEnd);
+}
+
+void ManageNewsClose()
+{
+    if(!InpUseNewsFilter || !InpCloseBeforeNews) return;
+
+    datetime now = TimeCurrent();
+    MqlDateTime ts;
+    TimeToStruct(now, ts);
+    ts.hour = InpNewsTimeHour; ts.min = InpNewsTimeMinute; ts.sec = 0;
+    datetime newsTime  = StructToTime(ts);
+    datetime preStart  = (datetime)(newsTime - (long)InpMinutesBeforeNews * 60);
+
+    if(now < preStart || now >= newsTime) return;
+
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+        if(posInfo.SelectByIndex(i) && posInfo.Magic() == InpMagicNumber)
+        {
+            Print("Pre-news: closing position #", posInfo.Ticket());
+            trade.PositionClose(posInfo.Ticket());
+            LogTradePnl(GetLastDealProfit());
+        }
+}
+
+//+------------------------------------------------------------------+
+double CalculateLotSize()
+{
+    if(InpStopLossPoints <= 0) return 0;
+    double equity    = account.Equity();
+    double riskAmt   = equity * (InpRiskPercent / 100.0);
+    double tickVal   = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    if(tickSize == 0) return 0;
+    double valPerPt  = tickVal / tickSize;
+    double slMoney   = InpStopLossPoints * _Point * (valPerPt / _Point);
+    if(slMoney <= 0) return 0;
+    return NormalizeVolume(riskAmt / slMoney);
+}
+
+double NormalizeVolume(double vol)
+{
+    double minV = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    double maxV = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+    double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    if(vol < minV) vol = minV;
+    if(vol > maxV) vol = maxV;
+    if(step > 0)   vol = MathRound(vol / step) * step;
+    if(vol < minV) vol = minV;
+    if(vol > maxV) vol = maxV;
+    return vol;
+}

@@ -1,30 +1,25 @@
-; EURGBP M5 - RSI Engine v2.4 (divergence → slope alignment → channel SL exit)
-; Note: EURGBP low volatility — tighter channel multiplier, longer RSI period
+; EURGBP M5 - RSI Engine v2.2 (RSI mean reversion scalping)
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=250
-InpTakeProfitPoints=400
-InpMagicNumber=190229
-InpMaxSpreadPoints=25
-InpUseTrailingStop=true
+InpStopLossPoints=300
+InpTakeProfitPoints=450
+InpMagicNumber=220008
+InpMaxSpreadPoints=15
 InpUseBreakEven=true
-InpBreakEvenTrigger=100
-InpTrailingStopTrigger=350
-InpTrailingStopStep=80
+InpBreakEvenTrigger=150
+InpUseTrailingStop=true
+InpTrailingStopTrigger=250
+InpTrailingStopStep=100
 InpRSI_Period=7
 InpRSI_Overbought=70
 InpRSI_Oversold=30
-InpUse_RSI_Level_Exit=false
-InpUse_Slope_Alignment_Exit=true
-InpSlope_Lookback_Bars=20
-InpEntry_Lookback_Bars=10
-InpUseChannelSL=true
-InpChannelSL_StdDevMul=1.8
-InpVerboseEntryLogs=true
+InpUseEMAFilter=true
+InpEMA_Period=50
+InpVerboseLogs=true
 EnableDailyLimits=true
-DailyProfitTarget=130.0
-DailyLossLimit=260.0
+DailyProfitTarget=300.0
+DailyLossLimit=150.0
 InpUseNewsFilter=true
 InpCloseBeforeNews=true
 InpNewsTimeHour=15

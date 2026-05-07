@@ -1,31 +1,26 @@
-; USDCNH M5 - RSI Engine v2.4 (divergence → slope alignment → channel SL exit)
-; Note: USDCNH exotic — wide spread, high volatility, wider channel multiplier
+; USDCNH M5 - RSI Engine v2.2 (RSI mean reversion scalping)
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
-InpStopLossPoints=1500
-InpTakeProfitPoints=1200
-InpMagicNumber=190228
-InpMaxSpreadPoints=50
-InpUseTrailingStop=true
+InpStopLossPoints=300
+InpTakeProfitPoints=450
+InpMagicNumber=220007
+InpMaxSpreadPoints=30
 InpUseBreakEven=true
-InpBreakEvenTrigger=700
-InpTrailingStopTrigger=1000
-InpTrailingStopStep=200
+InpBreakEvenTrigger=150
+InpUseTrailingStop=true
+InpTrailingStopTrigger=250
+InpTrailingStopStep=100
 InpRSI_Period=7
 InpRSI_Overbought=70
 InpRSI_Oversold=30
-InpUse_RSI_Level_Exit=false
-InpUse_Slope_Alignment_Exit=true
-InpSlope_Lookback_Bars=20
-InpEntry_Lookback_Bars=10
-InpUseChannelSL=true
-InpChannelSL_StdDevMul=2.5
-InpVerboseEntryLogs=true
+InpUseEMAFilter=true
+InpEMA_Period=50
+InpVerboseLogs=true
 EnableDailyLimits=true
-DailyProfitTarget=120.0
-DailyLossLimit=240.0
-InpUseNewsFilter=false
+DailyProfitTarget=300.0
+DailyLossLimit=150.0
+InpUseNewsFilter=true
 InpCloseBeforeNews=true
 InpNewsTimeHour=15
 InpNewsTimeMinute=30
