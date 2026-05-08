@@ -36,7 +36,16 @@ input int    InpRSI_Oversold    = 10;  // Oversold level
 input group "Strategy Filters"
 input bool   InpUseEMAFilter   = true;   // Only buy above EMA, only sell below EMA?
 input int    InpEMA_Period     = 200;    // EMA period for trend filter
+input bool   InpUseADXFilter   = true;   // Use ADX to switch between mean-reversion and hidden-divergence?
+input int    InpADX_Period     = 14;     // ADX period
+input double InpADX_Threshold  = 30.0;  // ADX above this = trending regime (hidden divergence mode)
 input bool   InpVerboseLogs    = true;   // Print detailed logs
+
+//--- Hidden Divergence Settings (Trending Regime)
+input group "Hidden Divergence Settings (ADX Trending Mode)"
+input int    InpDivLookback     = 20;   // Bars to look back for swing reference
+input int    InpDivRSI_Pullback = 40;   // RSI must be below this to confirm pullback in uptrend
+input int    InpDivRSI_Rally    = 60;   // RSI must be above this to confirm rally in downtrend
 
 //--- Daily Limits
 input group "Daily Limits (deposit currency)"
@@ -73,11 +82,13 @@ CDealInfo     deal;
 
 int      rsi_handle;
 int      ema_handle;
+int      adx_handle;
 bool     g_daily_limit_reached  = false;
 datetime g_last_limit_check_day = 0;
 bool     g_was_in_position      = false;
 double   g_daily_pnl            = 0.0;
 datetime g_daily_pnl_day        = 0;
+int      g_last_regime          = -1;  // 0=ranging, 1=trending (for regime-change logging)
 
 //+------------------------------------------------------------------+
 double GetRSI(int shift)
@@ -91,6 +102,13 @@ double GetEMA(int shift)
 {
     double buf[1];
     if(CopyBuffer(ema_handle, 0, shift, 1, buf) > 0) return buf[0];
+    return -1;
+}
+
+double GetADX(int shift)
+{
+    double buf[1];
+    if(CopyBuffer(adx_handle, 0, shift, 1, buf) > 0) return buf[0];
     return -1;
 }
 
@@ -132,10 +150,14 @@ int OnInit()
     ema_handle = iMA(_Symbol, _Period, InpEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
     if(ema_handle == INVALID_HANDLE) { Print("EMA handle failed"); return INIT_FAILED; }
 
-    PrintFormat("RSI Engine v2.2 initialized | RSI(%d) OB=%d OS=%d | EMA filter=%s | SL=%d TP=%d pts",
+    adx_handle = iADX(_Symbol, _Period, InpADX_Period);
+    if(adx_handle == INVALID_HANDLE) { Print("ADX handle failed"); return INIT_FAILED; }
+
+    PrintFormat("RSI Engine v2.2 initialized | RSI(%d) OB=%d OS=%d | EMA(%d) filter=%s | ADX(%d) regime=%s (threshold=%.0f) | DivLookback=%d | SL=%d TP=%d pts",
                 InpRSI_Period, InpRSI_Overbought, InpRSI_Oversold,
-                InpUseEMAFilter ? "ON" : "OFF",
-                InpStopLossPoints, InpTakeProfitPoints);
+                InpEMA_Period, InpUseEMAFilter ? "ON" : "OFF",
+                InpADX_Period, InpUseADXFilter ? "ON" : "OFF", InpADX_Threshold,
+                InpDivLookback, InpStopLossPoints, InpTakeProfitPoints);
     return INIT_SUCCEEDED;
 }
 
@@ -143,6 +165,7 @@ void OnDeinit(const int reason)
 {
     IndicatorRelease(rsi_handle);
     IndicatorRelease(ema_handle);
+    IndicatorRelease(adx_handle);
     Print("RSI Engine v2.2 deinitialized. Reason: ", reason);
 }
 
@@ -195,7 +218,27 @@ void OnTick()
         return;
     }
 
-    CheckForEntrySignals();
+    // Route to strategy based on market regime
+    if(InpUseADXFilter)
+    {
+        double adx = GetADX(1);
+        if(adx < 0) return;
+        int regime = (adx >= InpADX_Threshold) ? 1 : 0;
+        if(regime != g_last_regime)
+        {
+            if(regime == 1)
+                PrintFormat("[REGIME] Switched to TRENDING (ADX=%.1f >= %.0f) — hidden divergence mode", adx, InpADX_Threshold);
+            else
+                PrintFormat("[REGIME] Switched to RANGING (ADX=%.1f < %.0f) — mean reversion mode", adx, InpADX_Threshold);
+            g_last_regime = regime;
+        }
+        if(regime == 1)
+            CheckForHiddenDivergence();
+        else
+            CheckForEntrySignals();
+    }
+    else
+        CheckForEntrySignals();
 }
 
 //+------------------------------------------------------------------+
@@ -274,6 +317,89 @@ void CheckForEntrySignals()
                     bid, rsi2, rsi1, sl, tp, lots);
         if(!trade.Sell(lots, _Symbol, bid, sl, tp, "TRE_v22_Sell"))
             PrintFormat("[ENTRY] SELL failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+    }
+}
+
+//+------------------------------------------------------------------+
+// Hidden divergence entry (trending regime — ADX >= threshold)
+//   Hidden bullish: uptrend + price higher low + RSI lower low → BUY (trend resumes after pullback)
+//   Hidden bearish: downtrend + price lower high + RSI higher high → SELL (trend resumes after rally)
+//+------------------------------------------------------------------+
+void CheckForHiddenDivergence()
+{
+    if(IsDailyLimitReached())    { if(InpVerboseLogs) Print("Entry blocked: daily limit reached."); return; }
+    if(!IsWithinTradingHours())  { if(InpVerboseLogs) Print("Entry blocked: outside trading hours."); return; }
+    if(IsNewsTimeRestricted())   { if(InpVerboseLogs) Print("Entry blocked: news filter."); return; }
+
+    double ema    = GetEMA(1);       if(ema < 0) return;
+    double price1 = iClose(_Symbol, _Period, 1);
+    double rsi1   = GetRSI(1);       if(rsi1 < 0) return;
+
+    bool uptrend   = (price1 > ema);
+    bool downtrend = (price1 < ema);
+    if(!uptrend && !downtrend) return;
+
+    // Find the reference swing bar in the lookback window
+    int    refBar   = -1;
+    double refClose = 0, refRSI = 0;
+
+    if(uptrend && rsi1 < InpDivRSI_Pullback)
+    {
+        // Find bar with lowest close in [2..InpDivLookback]
+        double minClose = DBL_MAX;
+        for(int i = 2; i <= InpDivLookback; i++)
+        {
+            double c = iClose(_Symbol, _Period, i);
+            if(c < minClose) { minClose = c; refBar = i; }
+        }
+        if(refBar < 0) return;
+        refClose = iClose(_Symbol, _Period, refBar);
+        refRSI   = GetRSI(refBar);  if(refRSI < 0) return;
+
+        // Hidden bullish: price1 > refClose (higher low) AND rsi1 < refRSI (lower RSI)
+        if(price1 > refClose && rsi1 < refRSI)
+        {
+            double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+            if(lots <= 0) return;
+            double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+            double sl  = ask - InpStopLossPoints  * _Point;
+            double tp  = ask + InpTakeProfitPoints * _Point;
+            PrintFormat("[DIV] HIDDEN BULL BUY @ %.5f | RSI: %.1f < ref %.1f (bar %d) | price: %.5f > ref %.5f | SL: %.5f | TP: %.5f",
+                        ask, rsi1, refRSI, refBar, price1, refClose, sl, tp);
+            if(!trade.Buy(lots, _Symbol, ask, sl, tp, "TRE_v22_DivBuy"))
+                PrintFormat("[DIV] BUY failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+        }
+        else if(InpVerboseLogs)
+            PrintFormat("[DIV] No hidden bull | RSI: %.1f ref: %.1f | price: %.5f ref: %.5f", rsi1, refRSI, price1, refClose);
+    }
+    else if(downtrend && rsi1 > InpDivRSI_Rally)
+    {
+        // Find bar with highest close in [2..InpDivLookback]
+        double maxClose = -DBL_MAX;
+        for(int i = 2; i <= InpDivLookback; i++)
+        {
+            double c = iClose(_Symbol, _Period, i);
+            if(c > maxClose) { maxClose = c; refBar = i; }
+        }
+        if(refBar < 0) return;
+        refClose = iClose(_Symbol, _Period, refBar);
+        refRSI   = GetRSI(refBar);  if(refRSI < 0) return;
+
+        // Hidden bearish: price1 < refClose (lower high) AND rsi1 > refRSI (higher RSI)
+        if(price1 < refClose && rsi1 > refRSI)
+        {
+            double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+            if(lots <= 0) return;
+            double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+            double sl  = bid + InpStopLossPoints  * _Point;
+            double tp  = bid - InpTakeProfitPoints * _Point;
+            PrintFormat("[DIV] HIDDEN BEAR SELL @ %.5f | RSI: %.1f > ref %.1f (bar %d) | price: %.5f < ref %.5f | SL: %.5f | TP: %.5f",
+                        bid, rsi1, refRSI, refBar, price1, refClose, sl, tp);
+            if(!trade.Sell(lots, _Symbol, bid, sl, tp, "TRE_v22_DivSell"))
+                PrintFormat("[DIV] SELL failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+        }
+        else if(InpVerboseLogs)
+            PrintFormat("[DIV] No hidden bear | RSI: %.1f ref: %.1f | price: %.5f ref: %.5f", rsi1, refRSI, price1, refClose);
     }
 }
 
