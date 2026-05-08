@@ -196,9 +196,9 @@ def run():
             print("\a", end="", flush=True)  # terminal bell
 
         print("─" * 62)
-        print(f"  \033[90mRefresh in 15s — Ctrl+C to quit\033[0m")
+        print(f"  \033[90mRefresh in 10min — Ctrl+C to quit\033[0m")
 
-        time.sleep(15)
+        time.sleep(600)
 
 
 if __name__ == "__main__":
