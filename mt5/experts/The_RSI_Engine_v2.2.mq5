@@ -23,6 +23,9 @@ input double InpRiskPercent       = 1.0;    // Risk % of equity per trade (if en
 input double InpLots              = 0.1;    // Fixed lot size
 input int    InpStopLossPoints    = 200;    // Stop Loss in points (20 pips)
 input int    InpTakeProfitPoints  = 150;    // Take Profit in points (15 pips)
+input bool   InpUseTrailing       = true;   // Enable trailing stop?
+input int    InpTrailingTrigger   = 100;    // Profit in points before trailing activates (10 pips)
+input int    InpTrailingStep      = 80;     // Trailing distance from price in points (8 pips)
 input ulong  InpMagicNumber       = 2200;   // Unique EA ID
 input int    InpMaxSpreadPoints   = 10;     // Max spread allowed for entry (tight for scalping)
 
@@ -413,9 +416,57 @@ bool IsPositionOpen()
 }
 
 //+------------------------------------------------------------------+
-// No trailing stop for RSI(2) scalping — TP/SL targets are too tight (15/20 pips).
-// Broker handles TP/SL execution directly.
-void ManageTrailingStop() { }
+// Trailing stop: activates once profit >= InpTrailingTrigger points,
+// then keeps SL at InpTrailingStep points behind price.
+// Moves SL only forward (never back), locking in profit progressively.
+void ManageTrailingStop()
+{
+    if(!InpUseTrailing) return;
+
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        if(!posInfo.SelectByIndex(i)) continue;
+        if(posInfo.Magic()  != InpMagicNumber) continue;
+        if(posInfo.Symbol() != _Symbol)        continue;
+
+        double open  = posInfo.PriceOpen();
+        double sl    = posInfo.StopLoss();
+        double tp    = posInfo.TakeProfit();
+        double bid   = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+        double ask   = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        double trigger = InpTrailingTrigger * _Point;
+        double step    = InpTrailingStep    * _Point;
+
+        if(posInfo.PositionType() == POSITION_TYPE_BUY)
+        {
+            double profit = bid - open;
+            if(profit < trigger) continue;          // not enough profit yet
+            double newSL = bid - step;
+            newSL = NormalizeDouble(newSL, _Digits);
+            if(newSL <= sl) continue;               // only move SL forward
+            if(trade.PositionModify(posInfo.Ticket(), newSL, tp))
+            {
+                if(InpVerboseLogs)
+                    PrintFormat("[TRAIL] BUY SL moved to %.5f (bid=%.5f profit=%.1f pts)",
+                                newSL, bid, profit / _Point);
+            }
+        }
+        else if(posInfo.PositionType() == POSITION_TYPE_SELL)
+        {
+            double profit = open - ask;
+            if(profit < trigger) continue;
+            double newSL = ask + step;
+            newSL = NormalizeDouble(newSL, _Digits);
+            if(sl > 0 && newSL >= sl) continue;    // only move SL forward
+            if(trade.PositionModify(posInfo.Ticket(), newSL, tp))
+            {
+                if(InpVerboseLogs)
+                    PrintFormat("[TRAIL] SELL SL moved to %.5f (ask=%.5f profit=%.1f pts)",
+                                newSL, ask, profit / _Point);
+            }
+        }
+    }
+}
 
 //+------------------------------------------------------------------+
 bool IsDailyLimitReached()
