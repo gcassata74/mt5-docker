@@ -42,8 +42,8 @@ input int    InpEMA_Period     = 200;    // EMA period for trend filter
 input bool   InpUseADXFilter      = true;   // Use ADX to switch between mean-reversion and hidden-divergence?
 input int    InpADX_Period        = 14;     // ADX period
 input double InpADX_Threshold     = 30.0;  // ADX above this = trending regime (hidden divergence mode)
-input bool   InpUseCorrelFilter   = true;   // Block new trades if already long/short USD in another pair?
-input int    InpMaxUSDSameDir     = 1;      // Max open positions in the same USD direction across all pairs
+input bool   InpUseCorrelFilter   = true;   // Block new trades if a currency is already exposed in N positions?
+input int    InpMaxSameCurrDir    = 1;      // Max positions long/short any single currency across all pairs
 input bool   InpVerboseLogs       = true;   // Print detailed logs
 
 //--- Hidden Divergence Settings (Trending Regime)
@@ -117,41 +117,41 @@ double GetADX(int shift)
     return -1;
 }
 
-// Returns USD direction of a trade: +1 = long USD, -1 = short USD, 0 = no USD leg
-int USDDirection(string sym, ENUM_POSITION_TYPE posType)
+// Returns true if opening a new trade would exceed the per-currency position limit.
+// Checks both legs: e.g. a BUY on EURUSD goes long EUR and short USD.
+bool IsCorrelated(string currency, int newDir)
 {
-    bool isUSDBase  = (StringSubstr(sym, 0, 3) == "USD");
-    bool isUSDQuote = (StringSubstr(sym, 3, 3) == "USD");
-    if(!isUSDBase && !isUSDQuote) return 0;
-
-    // BUY on USD-base pair = long USD; BUY on USD-quote pair = short USD
-    if(isUSDBase)  return (posType == POSITION_TYPE_BUY)  ?  1 : -1;
-    if(isUSDQuote) return (posType == POSITION_TYPE_BUY)  ? -1 :  1;
-    return 0;
-}
-
-// Counts open positions across ALL pairs with our magic number range that share the same USD direction
-bool IsUSDCorrelated(int newUSDDir)
-{
-    if(!InpUseCorrelFilter || newUSDDir == 0) return false;
-
     int count = 0;
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
         if(!posInfo.SelectByIndex(i)) continue;
         ulong magic = posInfo.Magic();
-        if(magic < 220001 || magic > 220020) continue;  // our EA range
-        int dir = USDDirection(posInfo.Symbol(), posInfo.PositionType());
-        if(dir == newUSDDir) count++;
+        if(magic < 220001 || magic > 220020) continue;
+        string sym = posInfo.Symbol();
+        string b   = StringSubstr(sym, 0, 3);
+        string q   = StringSubstr(sym, 3, 3);
+        int dir = 0;
+        if(b == currency) dir = (posInfo.PositionType() == POSITION_TYPE_BUY) ?  1 : -1;
+        if(q == currency) dir = (posInfo.PositionType() == POSITION_TYPE_BUY) ? -1 :  1;
+        if(dir == newDir) count++;
     }
-    if(count >= InpMaxUSDSameDir)
+    if(count >= InpMaxSameCurrDir)
     {
         if(InpVerboseLogs)
-            PrintFormat("Entry blocked: USD correlation filter (%d positions already %s USD)",
-                        count, newUSDDir > 0 ? "long" : "short");
+            PrintFormat("Entry blocked: %s correlation (%d positions already %s %s)",
+                        currency, count, newDir > 0 ? "long" : "short", currency);
         return true;
     }
     return false;
+}
+
+bool IsEntryCurrencyBlocked(bool isBuy)
+{
+    if(!InpUseCorrelFilter) return false;
+    string base  = StringSubstr(_Symbol, 0, 3);
+    string quote = StringSubstr(_Symbol, 3, 3);
+    int baseDir  = isBuy ? 1 : -1;
+    return IsCorrelated(base, baseDir) || IsCorrelated(quote, -baseDir);
 }
 
 //+------------------------------------------------------------------+
@@ -338,10 +338,7 @@ void CheckForEntrySignals()
         if(!buySignal && !sellSignal) return;
     }
 
-    // USD correlation filter
-    int usdDir = buySignal ? USDDirection(_Symbol, POSITION_TYPE_BUY)
-                           : USDDirection(_Symbol, POSITION_TYPE_SELL);
-    if(IsUSDCorrelated(usdDir)) return;
+    if(IsEntryCurrencyBlocked(buySignal)) return;
 
     double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
     if(lots <= 0) return;
@@ -408,7 +405,7 @@ void CheckForHiddenDivergence()
         // Hidden bullish: price1 > refClose (higher low) AND rsi1 < refRSI (lower RSI)
         if(price1 > refClose && rsi1 < refRSI)
         {
-            if(IsUSDCorrelated(USDDirection(_Symbol, POSITION_TYPE_BUY))) return;
+            if(IsEntryCurrencyBlocked(true)) return;
             double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
             if(lots <= 0) return;
             double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -438,7 +435,7 @@ void CheckForHiddenDivergence()
         // Hidden bearish: price1 < refClose (lower high) AND rsi1 > refRSI (higher RSI)
         if(price1 < refClose && rsi1 > refRSI)
         {
-            if(IsUSDCorrelated(USDDirection(_Symbol, POSITION_TYPE_SELL))) return;
+            if(IsEntryCurrencyBlocked(false)) return;
             double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
             if(lots <= 0) return;
             double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
