@@ -20,24 +20,26 @@ except ImportError:
 LOG_DIR = Path(__file__).parent / "mt5" / "logs"
 
 TICKERS = {
-    "EURUSD": "EURUSD=X",  "USDJPY": "USDJPY=X",
-    "USDCHF": "USDCHF=X",  "AUDUSD": "AUDUSD=X",
-    "GBPUSD": "GBPUSD=X",  "EURJPY": "EURJPY=X",
-    "EURGBP": "EURGBP=X",  "USDCNH": "USDCNH=X",
+    "EURUSD": "EURUSD=X",
+    "USDJPY": "USDJPY=X",
+    "USDCHF": "USDCHF=X",
+    "AUDUSD": "AUDUSD=X",
 }
 
 PIP_EUR = {
-    "EURUSD": 10.0, "GBPUSD": 10.0, "AUDUSD": 6.4,
-    "USDCHF": 11.0, "USDJPY": 6.4,  "EURJPY": 6.4,
-    "EURGBP": 12.0, "USDCNH": 1.4,
+    "EURUSD": 10.0,
+    "USDJPY": 6.4,
+    "USDCHF": 11.0,
+    "AUDUSD": 6.4,
 }
 
-JPY_PAIRS = {"USDJPY", "EURJPY"}
+JPY_PAIRS = {"USDJPY"}
 
 MAGIC_SYMBOLS = {
-    "220001": "EURUSD", "220002": "AUDUSD", "220003": "USDCHF",
-    "220004": "GBPUSD", "220005": "USDJPY", "220006": "EURJPY",
-    "220007": "USDCNH", "220008": "EURGBP",
+    "220001": "EURUSD",
+    "220002": "AUDUSD",
+    "220003": "USDCHF",
+    "220005": "USDJPY",
 }
 
 
