@@ -529,23 +529,34 @@ bool IsDailyLimitReached()
     }
     if(g_daily_limit_reached) return true;
 
+    // Sum closed P&L across ALL our EA pairs (magic 220001-220020)
     double profit = 0;
     if(HistorySelect(dayStart, TimeCurrent()))
         for(int i = 0; i < (int)HistoryDealsTotal(); i++)
-            if(deal.SelectByIndex(i) && deal.Magic() == InpMagicNumber)
-                profit += deal.Profit() + deal.Commission() + deal.Swap();
+            if(deal.SelectByIndex(i))
+            {
+                ulong m = deal.Magic();
+                if(m >= 220001 && m <= 220020)
+                    profit += deal.Profit() + deal.Commission() + deal.Swap();
+            }
 
-    if(posInfo.SelectByMagic(_Symbol, InpMagicNumber))
-        profit += posInfo.Profit();
+    // Add floating P&L from all open EA positions
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+        if(posInfo.SelectByIndex(i))
+        {
+            ulong m = posInfo.Magic();
+            if(m >= 220001 && m <= 220020)
+                profit += posInfo.Profit();
+        }
 
     if(profit >= DailyProfitTarget)
     {
-        PrintFormat("[LIMIT] Daily profit target %.2f reached. Stopping.", DailyProfitTarget);
+        PrintFormat("[LIMIT] Daily profit target reached (%.2f EUR overall). All pairs stopped.", profit);
         g_daily_limit_reached = true; return true;
     }
     if(profit <= -DailyLossLimit)
     {
-        PrintFormat("[LIMIT] Daily loss limit %.2f reached. Stopping.", DailyLossLimit);
+        PrintFormat("[LIMIT] Daily loss limit reached (%.2f EUR overall). All pairs stopped.", profit);
         g_daily_limit_reached = true; return true;
     }
     return false;
