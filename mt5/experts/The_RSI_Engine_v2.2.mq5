@@ -290,6 +290,7 @@ void OnTick()
 //+------------------------------------------------------------------+
 void CheckForEntrySignals()
 {
+    if(IsPositionOpen()) return;
     if(IsDailyLimitReached())
     {
         if(InpVerboseLogs) Print("Entry blocked: daily limit reached.");
@@ -374,6 +375,7 @@ void CheckForEntrySignals()
 //+------------------------------------------------------------------+
 void CheckForHiddenDivergence()
 {
+    if(IsPositionOpen()) return;
     if(IsDailyLimitReached())    { if(InpVerboseLogs) Print("Entry blocked: daily limit reached."); return; }
     if(!IsWithinTradingHours())  { if(InpVerboseLogs) Print("Entry blocked: outside trading hours."); return; }
     if(IsNewsTimeRestricted())   { if(InpVerboseLogs) Print("Entry blocked: news filter."); return; }
