@@ -177,6 +177,7 @@ void OnTick()
 {
     ManageSessionEnd();
     ManageNewsClose();
+    ManageDailyLossClose();
     ManageTrailingStop();
 
     bool now_in_position = IsPositionOpen();
@@ -567,6 +568,24 @@ void ManageSessionEnd()
         g_daily_pnl = 0.0;
     }
     wasInSession = isInSession;
+}
+
+//+------------------------------------------------------------------+
+// Close all open positions when daily loss limit is hit.
+void ManageDailyLossClose()
+{
+    if(!EnableDailyLimits) return;
+    if(!g_daily_limit_reached) return;
+
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        if(!posInfo.SelectByIndex(i)) continue;
+        if(posInfo.Magic()  != InpMagicNumber) continue;
+        if(posInfo.Symbol() != _Symbol)        continue;
+        PrintFormat("[LIMIT] Daily loss limit hit — closing position #%d", posInfo.Ticket());
+        trade.PositionClose(posInfo.Ticket());
+        LogTradePnl(GetLastDealProfit());
+    }
 }
 
 //+------------------------------------------------------------------+
