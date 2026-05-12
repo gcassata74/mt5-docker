@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                         ScalpEngine_v3.mq5       |
-//|                                      Copyright 2025, SPLpulse   |
-//|                                           https://splpulse.com  |
+//|                          Copyright 2026, izylife solutions s.r.l.|
+//|                                  https://www.izylifesolutions.com|
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2025, ScalpEngine v3 MT5 EA by SPLpulse"
-#property link      "https://splpulse.com"
+#property copyright "Copyright 2026, izylife solutions s.r.l."
+#property link      "https://www.izylifesolutions.com"
 #property version   "3.0"
 // v3.0 multi-strategy EA: MEAN_REVERSION, SESSION_BREAKOUT, EMA_CROSS_ADX
 //   Strategy 0 — MEAN_REVERSION: RSI(2) cross-back from OB/OS, ADX regime routing,
