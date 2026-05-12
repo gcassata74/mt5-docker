@@ -19,7 +19,7 @@ except ImportError:
     exit(1)
 
 CONTAINER   = "mt5-docker-mt5-1"
-LOG_DIR_CT  = "/config/.wine/drive_c/Program Files/MetaTrader 5/logs"
+LOG_DIR_CT  = "/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Logs"
 
 TICKERS = {
     "EURUSD": "EURUSD=X",
