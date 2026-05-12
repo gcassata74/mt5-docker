@@ -2,11 +2,11 @@
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=2.5
-InpStopLossPoints=30
+InpStopLossPoints=25
 InpTakeProfitPoints=0
 InpUseTrailing=true
-InpTrailingTrigger=25
-InpTrailingStep=20
+InpTrailingTrigger=15
+InpTrailingStep=10
 InpStrategy=0
 InpMagicNumber=220006
 InpMaxSpreadPoints=15
