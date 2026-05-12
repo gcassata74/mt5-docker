@@ -333,6 +333,7 @@ int OnInit()
     trade.SetExpertMagicNumber(InpMagicNumber);
     trade.SetDeviationInPoints(10);
     trade.SetTypeFillingBySymbol(_Symbol);
+    g_ema_cross_dir = 0;
 
     // Create handles on InpSignalTF
     rsi_handle = iRSI(_Symbol, InpSignalTF, InpRSI_Period, PRICE_CLOSE);
@@ -843,7 +844,7 @@ bool IsPositionOpen()
 {
     for(int i = PositionsTotal() - 1; i >= 0; i--)
         if(posInfo.SelectByIndex(i) &&
-           posInfo.Magic() == InpMagicNumber &&
+           IsManagedMagic(posInfo.Magic()) &&
            posInfo.Symbol() == _Symbol)
             return true;
     return false;
@@ -859,7 +860,7 @@ void ManageTrailingStop()
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
         if(!posInfo.SelectByIndex(i)) continue;
-        if(posInfo.Magic()  != InpMagicNumber) continue;
+        if(!IsManagedMagic(posInfo.Magic())) continue;
         if(posInfo.Symbol() != _Symbol)        continue;
 
         double open    = posInfo.PriceOpen();
