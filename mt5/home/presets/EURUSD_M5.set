@@ -1,4 +1,4 @@
-; EURUSD M5 - RSI Engine v2.2 (RSI(2) fast scalping, many trades)
+; EURUSD M5 - ScalpEngine v3 (MEAN_REVERSION, RSI(2) scalping)
 InpUseRiskManagement=false
 InpRiskPercent=1.0
 InpLots=1
@@ -7,8 +7,11 @@ InpTakeProfitPoints=0
 InpUseTrailing=true
 InpTrailingTrigger=25
 InpTrailingStep=20
+InpStrategy=0
 InpMagicNumber=220001
 InpMaxSpreadPoints=15
+InpMultiPairMode=true
+InpSignalTF=5
 InpRSI_Period=2
 InpRSI_Overbought=90
 InpRSI_Oversold=10
@@ -22,6 +25,11 @@ InpMaxSameCurrDir=1
 InpDivLookback=20
 InpDivRSI_Pullback=40
 InpDivRSI_Rally=60
+InpBreakoutHour=7
+InpBreakoutRangeMin=30
+InpFastEMA_Period=8
+InpSlowEMA_Period=21
+InpTrendEMA_Period=200
 InpVerboseLogs=true
 EnableDailyLimits=true
 DailyProfitTarget=150.0
