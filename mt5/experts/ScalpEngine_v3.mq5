@@ -683,9 +683,8 @@ void UpdateBreakoutRange()
     // Accumulate H/L during range window
     if(now >= rangeStart && now < rangeEnd)
     {
-        double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-        if(ask > g_brk_high) g_brk_high = ask;
+        if(bid > g_brk_high) g_brk_high = bid;
         if(bid < g_brk_low || g_brk_low == DBL_MAX) g_brk_low = bid;
     }
     else if(now >= rangeEnd && !g_brk_range_built && g_brk_high > 0 && g_brk_low < DBL_MAX)
@@ -776,10 +775,6 @@ void CheckEMACrossADX()
     bool bullCross = (fast2 <= slow2 && fast1 > slow1);
     bool bearCross = (fast2 >= slow2 && fast1 < slow1);
 
-    // Update cross direction on any cross (regardless of other filters)
-    if(bullCross) g_ema_cross_dir = 1;
-    if(bearCross) g_ema_cross_dir = -1;
-
     if(adx < InpADX_Threshold)
     {
         if(InpVerboseLogs)
@@ -787,26 +782,14 @@ void CheckEMACrossADX()
         return;
     }
 
-    if(bullCross && price1 > trendEMA && g_ema_cross_dir != 1)
+    // BUY: fast crosses above slow + above EMA200 + cross direction changed since last entry
+    if(bullCross && g_ema_cross_dir != 1 && price1 > trendEMA)
     {
-        // g_ema_cross_dir already set to 1 above; this branch won't fire due to != 1 guard
-        // (kept for clarity — cross dir prevents re-entry until opposite cross)
-    }
-
-    // BUY: fast crosses above slow + above EMA200 + no repeat entry
-    if(bullCross && price1 > trendEMA)
-    {
-        if(g_ema_cross_dir == 1 && !bullCross)
-        {
-            if(InpVerboseLogs) Print("[EMACROSS] BUY blocked: no cross direction change");
-            return;
-        }
         if(IsEntryCurrencyBlocked(true)) return;
         double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
         if(lots <= 0) return;
         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
-        // SL from nearest swing low; fallback to InpStopLossPoints
         double slDist = InpStopLossPoints * _Point;
         int swLow = FindSwingLow(InpDivLookback, 2);
         if(swLow > 0)
@@ -819,19 +802,20 @@ void CheckEMACrossADX()
 
         PrintFormat("[EMACROSS] BUY @ %.5f | fast=%.5f slow=%.5f ADX=%.1f EMA200=%.5f | SL=%.5f TP=%.5f | lots=%.2f",
                     ask, fast1, slow1, adx, trendEMA, sl, tp, lots);
-        if(!trade.Buy(lots, _Symbol, ask, sl, tp, "SE3_EMA_Buy"))
+        if(trade.Buy(lots, _Symbol, ask, sl, tp, "SE3_EMA_Buy"))
+            g_ema_cross_dir = 1;
+        else
             PrintFormat("[EMACROSS] BUY failed: %d %s",
                         trade.ResultRetcode(), trade.ResultRetcodeDescription());
     }
-    // SELL: fast crosses below slow + below EMA200 + no repeat entry
-    else if(bearCross && price1 < trendEMA)
+    // SELL: fast crosses below slow + below EMA200 + cross direction changed since last entry
+    else if(bearCross && g_ema_cross_dir != -1 && price1 < trendEMA)
     {
         if(IsEntryCurrencyBlocked(false)) return;
         double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
         if(lots <= 0) return;
         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-        // SL from nearest swing high; fallback to InpStopLossPoints
         double slDist = InpStopLossPoints * _Point;
         int swHigh = FindSwingHigh(InpDivLookback, 2);
         if(swHigh > 0)
@@ -844,7 +828,9 @@ void CheckEMACrossADX()
 
         PrintFormat("[EMACROSS] SELL @ %.5f | fast=%.5f slow=%.5f ADX=%.1f EMA200=%.5f | SL=%.5f TP=%.5f | lots=%.2f",
                     bid, fast1, slow1, adx, trendEMA, sl, tp, lots);
-        if(!trade.Sell(lots, _Symbol, bid, sl, tp, "SE3_EMA_Sell"))
+        if(trade.Sell(lots, _Symbol, bid, sl, tp, "SE3_EMA_Sell"))
+            g_ema_cross_dir = -1;
+        else
             PrintFormat("[EMACROSS] SELL failed: %d %s",
                         trade.ResultRetcode(), trade.ResultRetcodeDescription());
     }
