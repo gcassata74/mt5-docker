@@ -7,6 +7,7 @@ Run: python3 monitor.py
 
 import os
 import re
+import subprocess
 import time
 from datetime import datetime, date
 from pathlib import Path
@@ -17,7 +18,8 @@ except ImportError:
     print("Run: pip install yfinance")
     exit(1)
 
-LOG_DIR = Path(__file__).parent / "mt5" / "logs"
+CONTAINER   = "mt5-docker-mt5-1"
+LOG_DIR_CT  = "/config/.wine/drive_c/Program Files/MetaTrader 5/logs"
 
 TICKERS = {
     "EURUSD": "EURUSD=X",
@@ -44,11 +46,17 @@ MAGIC_SYMBOLS = {
 
 
 def today_log():
-    path = LOG_DIR / f"{date.today().strftime('%Y%m%d')}.log"
-    if not path.exists():
+    log_path = f"{LOG_DIR_CT}/{date.today().strftime('%Y%m%d')}.log"
+    try:
+        result = subprocess.run(
+            ["docker", "exec", CONTAINER, "cat", log_path],
+            capture_output=True, timeout=10
+        )
+        if result.returncode != 0:
+            return []
+        raw = result.stdout
+    except Exception:
         return []
-    with open(path, "rb") as f:
-        raw = f.read()
     try:
         text = raw.decode("utf-16-le", errors="ignore")
     except Exception:
