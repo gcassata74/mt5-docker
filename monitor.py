@@ -70,11 +70,11 @@ def parse_trades(lines):
     closed = []     # list of {symbol, pnl, reason, time}
 
     entry_re = re.compile(
-        r'(\d{2}:\d{2}:\d{2}).*The_RSI_Engine_v2\.2 \((\w+),M5\).*'
+        r'(\d{2}:\d{2}:\d{2}).*ScalpEngine_v3 \((\w+),M5\).*'
         r'\[(?:ENTRY|DIV)\].*?(BUY|SELL) @ ([\d.]+).*SL: ([\d.]+).*TP: ([\d.]+)'
     )
     exit_re = re.compile(
-        r'(\d{2}:\d{2}:\d{2}).*The_RSI_Engine_v2\.2 \((\w+),M5\).*'
+        r'(\d{2}:\d{2}:\d{2}).*ScalpEngine_v3 \((\w+),M5\).*'
         r'\[EXIT\].*profit: ([+-]?[\d.]+) EUR'
     )
     exit_reason_re = re.compile(r'(TAKE PROFIT|STOP LOSS|closed externally|session)')
@@ -162,7 +162,7 @@ def run():
         win_rate     = (wins / total_trades * 100) if total_trades else 0
 
         # ── Header ──────────────────────────────────────────────────────
-        print(f"\033[1m RSI Engine v2.2 — Live Monitor  {now}\033[0m")
+        print(f"\033[1m ScalpEngine v3 — Live Monitor  {now}\033[0m")
         print("─" * 62)
 
         # ── Open positions ───────────────────────────────────────────────
