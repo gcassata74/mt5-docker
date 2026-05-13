@@ -374,13 +374,9 @@ void LoadConfig()
 {
     string filename = "presets\\" + _Symbol + "_M5.set";
     int handle = FileOpen(filename, FILE_READ|FILE_TXT|FILE_ANSI);
-    if(handle == INVALID_HANDLE)
-    {
-        if(InpVerboseLogs)
-            PrintFormat("[CONFIG] Cannot read %s — using input defaults", filename);
-        return;
-    }
-    int updated = 0;
+    if(handle == INVALID_HANDLE) return;
+
+    RuntimeConfig prev = g_cfg;
     while(!FileIsEnding(handle))
     {
         string line = FileReadString(handle);
@@ -392,28 +388,39 @@ void LoadConfig()
         string val = StringSubstr(line, eq + 1);
         StringTrimRight(val);
 
-        if(key == "InpLots")              { g_cfg.lots               = StringToDouble(val);              updated++; }
-        else if(key == "InpStopLossPoints")    { g_cfg.sl_points          = (int)StringToInteger(val);        updated++; }
-        else if(key == "InpTakeProfitPoints")  { g_cfg.tp_points          = (int)StringToInteger(val);        updated++; }
-        else if(key == "InpUseTrailing")       { g_cfg.use_trailing       = (val == "true");                  updated++; }
-        else if(key == "InpTrailingTrigger")   { g_cfg.trailing_trigger   = (int)StringToInteger(val);        updated++; }
-        else if(key == "InpTrailingStep")      { g_cfg.trailing_step      = (int)StringToInteger(val);        updated++; }
-        else if(key == "EnableDailyLimits")    { g_cfg.enable_daily_limits = (val == "true");                 updated++; }
-        else if(key == "DailyProfitTarget")    { g_cfg.daily_profit_target = StringToDouble(val);             updated++; }
-        else if(key == "DailyLossLimit")       { g_cfg.daily_loss_limit   = StringToDouble(val);              updated++; }
-        else if(key == "InpMaxSpreadPoints")   { g_cfg.max_spread         = (int)StringToInteger(val);        updated++; }
-        else if(key == "InpADX_Threshold")     { g_cfg.adx_threshold      = StringToDouble(val);              updated++; }
-        else if(key == "InpUseEMAFilter")      { g_cfg.use_ema_filter     = (val == "true");                  updated++; }
-        else if(key == "InpUseCorrelFilter")   { g_cfg.use_correl_filter  = (val == "true");                  updated++; }
-        else if(key == "InpMaxSameCurrDir")    { g_cfg.max_same_curr_dir  = (int)StringToInteger(val);        updated++; }
+        if(key == "InpLots")                   g_cfg.lots                = StringToDouble(val);
+        else if(key == "InpStopLossPoints")     g_cfg.sl_points           = (int)StringToInteger(val);
+        else if(key == "InpTakeProfitPoints")   g_cfg.tp_points           = (int)StringToInteger(val);
+        else if(key == "InpUseTrailing")        g_cfg.use_trailing        = (val == "true");
+        else if(key == "InpTrailingTrigger")    g_cfg.trailing_trigger    = (int)StringToInteger(val);
+        else if(key == "InpTrailingStep")       g_cfg.trailing_step       = (int)StringToInteger(val);
+        else if(key == "EnableDailyLimits")     g_cfg.enable_daily_limits = (val == "true");
+        else if(key == "DailyProfitTarget")     g_cfg.daily_profit_target = StringToDouble(val);
+        else if(key == "DailyLossLimit")        g_cfg.daily_loss_limit    = StringToDouble(val);
+        else if(key == "InpMaxSpreadPoints")    g_cfg.max_spread          = (int)StringToInteger(val);
+        else if(key == "InpADX_Threshold")      g_cfg.adx_threshold       = StringToDouble(val);
+        else if(key == "InpUseEMAFilter")       g_cfg.use_ema_filter      = (val == "true");
+        else if(key == "InpUseCorrelFilter")    g_cfg.use_correl_filter   = (val == "true");
+        else if(key == "InpMaxSameCurrDir")     g_cfg.max_same_curr_dir   = (int)StringToInteger(val);
     }
     FileClose(handle);
-    PrintFormat("[CONFIG] ✓ %s reloaded | lots=%.2f SL=%d TP=%d trail=%s trig=%d step=%d | DailyLimit=%.0f/%.0f",
-                filename,
-                g_cfg.lots, g_cfg.sl_points, g_cfg.tp_points,
-                g_cfg.use_trailing ? "ON" : "OFF",
-                g_cfg.trailing_trigger, g_cfg.trailing_step,
-                g_cfg.daily_profit_target, g_cfg.daily_loss_limit);
+
+    bool changed = (g_cfg.lots              != prev.lots              ||
+                    g_cfg.sl_points         != prev.sl_points         ||
+                    g_cfg.tp_points         != prev.tp_points         ||
+                    g_cfg.use_trailing      != prev.use_trailing      ||
+                    g_cfg.trailing_trigger  != prev.trailing_trigger  ||
+                    g_cfg.trailing_step     != prev.trailing_step     ||
+                    g_cfg.daily_profit_target != prev.daily_profit_target ||
+                    g_cfg.daily_loss_limit  != prev.daily_loss_limit);
+
+    if(changed)
+        PrintFormat("[CONFIG] ✓ %s | lots=%.2f SL=%d TP=%d trail=%s trig=%d step=%d | DailyLimit=%.0f/%.0f",
+                    filename,
+                    g_cfg.lots, g_cfg.sl_points, g_cfg.tp_points,
+                    g_cfg.use_trailing ? "ON" : "OFF",
+                    g_cfg.trailing_trigger, g_cfg.trailing_step,
+                    g_cfg.daily_profit_target, g_cfg.daily_loss_limit);
 }
 
 //+------------------------------------------------------------------+
