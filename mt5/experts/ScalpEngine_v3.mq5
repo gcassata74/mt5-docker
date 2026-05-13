@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, izylife solutions s.r.l."
 #property link      "https://www.izylifesolutions.com"
-#property version   "3.0"
+#property version   "3.1"
 // v3.0 multi-strategy EA: MEAN_REVERSION, SESSION_BREAKOUT, EMA_CROSS_ADX
 //   Strategy 0 — MEAN_REVERSION: RSI(2) cross-back from OB/OS, ADX regime routing,
 //                hidden divergence in trending regime; swing-based reference bars
@@ -18,6 +18,12 @@
 //   - CalculateLotSize: clean valPerPt = tickVal/tickSize; slMoney = SLpts * valPerPt
 //   - FindSwingLow/FindSwingHigh: proper 5-bar swing structure (close comparison)
 //   - All signal reads on InpSignalTF (default M15)
+//
+// v3.1 fixes:
+//   - ManageSessionEnd / ManageNewsClose: IsManagedMagic() instead of hardcoded magic (multi-pair fix)
+//   - UpdateBreakoutRange: uses iHigh/iLow of signal TF bar instead of bid ticks (more accurate range)
+//   - LoadConfig: StringTrimLeft(val) added to handle spaces after '=' in .set files
+//   - FindSwingLow/FindSwingHigh: guard if(startBar - endBar < 5) return -1
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
@@ -177,6 +183,8 @@ struct RuntimeConfig {
     bool   use_ema_filter;
     bool   use_correl_filter;
     int    max_same_curr_dir;
+    ulong           magic_number;
+    ENUM_TIMEFRAMES signal_tf;
 };
 RuntimeConfig g_cfg;
 
@@ -231,8 +239,8 @@ double GetTrendEMA(int shift)
 bool IsManagedMagic(ulong m)
 {
     if(!InpMultiPairMode)
-        return (m == InpMagicNumber);
-    return (m >= InpMagicNumber && m <= InpMagicNumber + 19);
+        return (m == g_cfg.magic_number);
+    return (m >= g_cfg.magic_number && m <= g_cfg.magic_number + 19);
 }
 
 //+------------------------------------------------------------------+
@@ -310,15 +318,16 @@ int FindSwingLow(int startBar, int endBar)
 {
     // startBar and endBar are shift indices (startBar > endBar typically means
     // startBar is older; iterate from endBar+2 to startBar-2 to have room for neighbors)
+    if(startBar - endBar < 5) return -1;  // not enough bars for a valid swing
     int best = -1;
     double bestClose = DBL_MAX;
     for(int i = startBar - 2; i >= endBar + 2; i--)
     {
-        double c  = iClose(_Symbol, InpSignalTF, i);
-        double c1 = iClose(_Symbol, InpSignalTF, i - 1);
-        double c2 = iClose(_Symbol, InpSignalTF, i - 2);
-        double cp1 = iClose(_Symbol, InpSignalTF, i + 1);
-        double cp2 = iClose(_Symbol, InpSignalTF, i + 2);
+        double c  = iClose(_Symbol, g_cfg.signal_tf, i);
+        double c1 = iClose(_Symbol, g_cfg.signal_tf, i - 1);
+        double c2 = iClose(_Symbol, g_cfg.signal_tf, i - 2);
+        double cp1 = iClose(_Symbol, g_cfg.signal_tf, i + 1);
+        double cp2 = iClose(_Symbol, g_cfg.signal_tf, i + 2);
         if(c < cp1 && c < cp2 && c < c1 && c < c2)
         {
             if(c < bestClose) { bestClose = c; best = i; }
@@ -329,15 +338,16 @@ int FindSwingLow(int startBar, int endBar)
 
 int FindSwingHigh(int startBar, int endBar)
 {
+    if(startBar - endBar < 5) return -1;  // not enough bars for a valid swing
     int best = -1;
     double bestClose = -DBL_MAX;
     for(int i = startBar - 2; i >= endBar + 2; i--)
     {
-        double c  = iClose(_Symbol, InpSignalTF, i);
-        double c1 = iClose(_Symbol, InpSignalTF, i - 1);
-        double c2 = iClose(_Symbol, InpSignalTF, i - 2);
-        double cp1 = iClose(_Symbol, InpSignalTF, i + 1);
-        double cp2 = iClose(_Symbol, InpSignalTF, i + 2);
+        double c  = iClose(_Symbol, g_cfg.signal_tf, i);
+        double c1 = iClose(_Symbol, g_cfg.signal_tf, i - 1);
+        double c2 = iClose(_Symbol, g_cfg.signal_tf, i - 2);
+        double cp1 = iClose(_Symbol, g_cfg.signal_tf, i + 1);
+        double cp2 = iClose(_Symbol, g_cfg.signal_tf, i + 2);
         if(c > cp1 && c > cp2 && c > c1 && c > c2)
         {
             if(c > bestClose) { bestClose = c; best = i; }
@@ -365,6 +375,8 @@ void InitConfig()
     g_cfg.use_ema_filter     = InpUseEMAFilter;
     g_cfg.use_correl_filter  = InpUseCorrelFilter;
     g_cfg.max_same_curr_dir  = InpMaxSameCurrDir;
+    g_cfg.magic_number       = InpMagicNumber;
+    g_cfg.signal_tf          = InpSignalTF;
 }
 
 //+------------------------------------------------------------------+
@@ -386,6 +398,7 @@ void LoadConfig()
         if(eq < 0) continue;
         string key = StringSubstr(line, 0, eq);
         string val = StringSubstr(line, eq + 1);
+        StringTrimLeft(val);
         StringTrimRight(val);
 
         if(key == "InpLots")                   g_cfg.lots                = StringToDouble(val);
@@ -402,6 +415,8 @@ void LoadConfig()
         else if(key == "InpUseEMAFilter")       g_cfg.use_ema_filter      = (val == "true");
         else if(key == "InpUseCorrelFilter")    g_cfg.use_correl_filter   = (val == "true");
         else if(key == "InpMaxSameCurrDir")     g_cfg.max_same_curr_dir   = (int)StringToInteger(val);
+        else if(key == "InpMagicNumber")        g_cfg.magic_number        = (ulong)StringToInteger(val);
+        else if(key == "InpSignalTF")           g_cfg.signal_tf           = (ENUM_TIMEFRAMES)(int)StringToInteger(val);
     }
     FileClose(handle);
 
@@ -412,7 +427,9 @@ void LoadConfig()
                     g_cfg.trailing_trigger  != prev.trailing_trigger  ||
                     g_cfg.trailing_step     != prev.trailing_step     ||
                     g_cfg.daily_profit_target != prev.daily_profit_target ||
-                    g_cfg.daily_loss_limit  != prev.daily_loss_limit);
+                    g_cfg.daily_loss_limit  != prev.daily_loss_limit  ||
+                    g_cfg.magic_number      != prev.magic_number      ||
+                    g_cfg.signal_tf         != prev.signal_tf);
 
     if(changed)
         PrintFormat("[CONFIG] ✓ %s | lots=%.2f SL=%d TP=%d trail=%s trig=%d step=%d | DailyLimit=%.0f/%.0f",
@@ -431,28 +448,28 @@ int OnInit()
     InitConfig();
     LoadConfig();
 
-    trade.SetExpertMagicNumber(InpMagicNumber);
+    trade.SetExpertMagicNumber(g_cfg.magic_number);
     trade.SetDeviationInPoints(10);
     trade.SetTypeFillingBySymbol(_Symbol);
     g_ema_cross_dir = 0;
 
     // Create handles on InpSignalTF
-    rsi_handle = iRSI(_Symbol, InpSignalTF, InpRSI_Period, PRICE_CLOSE);
+    rsi_handle = iRSI(_Symbol, g_cfg.signal_tf, InpRSI_Period, PRICE_CLOSE);
     if(rsi_handle == INVALID_HANDLE) { Print("RSI handle failed"); return INIT_FAILED; }
 
-    ema_handle = iMA(_Symbol, InpSignalTF, InpEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
+    ema_handle = iMA(_Symbol, g_cfg.signal_tf, InpEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
     if(ema_handle == INVALID_HANDLE) { Print("EMA handle failed"); return INIT_FAILED; }
 
-    adx_handle = iADX(_Symbol, InpSignalTF, InpADX_Period);
+    adx_handle = iADX(_Symbol, g_cfg.signal_tf, InpADX_Period);
     if(adx_handle == INVALID_HANDLE) { Print("ADX handle failed"); return INIT_FAILED; }
 
-    fast_ema_handle = iMA(_Symbol, InpSignalTF, InpFastEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
+    fast_ema_handle = iMA(_Symbol, g_cfg.signal_tf, InpFastEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
     if(fast_ema_handle == INVALID_HANDLE) { Print("Fast EMA handle failed"); return INIT_FAILED; }
 
-    slow_ema_handle = iMA(_Symbol, InpSignalTF, InpSlowEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
+    slow_ema_handle = iMA(_Symbol, g_cfg.signal_tf, InpSlowEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
     if(slow_ema_handle == INVALID_HANDLE) { Print("Slow EMA handle failed"); return INIT_FAILED; }
 
-    trend_ema_handle = iMA(_Symbol, InpSignalTF, InpTrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
+    trend_ema_handle = iMA(_Symbol, g_cfg.signal_tf, InpTrendEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
     if(trend_ema_handle == INVALID_HANDLE) { Print("Trend EMA handle failed"); return INIT_FAILED; }
 
     string stratName = (InpStrategy == MEAN_REVERSION)  ? "MEAN_REVERSION" :
@@ -460,8 +477,8 @@ int OnInit()
                                                            "EMA_CROSS_ADX";
     PrintFormat("ScalpEngine v3 initialized | Strategy=%s | TF=%s | Magic=%llu | MultiPair=%s | SL=%d TP=%d pts",
                 stratName,
-                EnumToString(InpSignalTF),
-                InpMagicNumber,
+                EnumToString(g_cfg.signal_tf),
+                g_cfg.magic_number,
                 InpMultiPairMode ? "ON" : "OFF",
                 g_cfg.sl_points, g_cfg.tp_points);
     return INIT_SUCCEEDED;
@@ -523,7 +540,7 @@ void OnTick()
 
     // Once-per-bar gate on InpSignalTF
     static datetime lastBar = 0;
-    datetime curBar = iTime(_Symbol, InpSignalTF, 0);
+    datetime curBar = iTime(_Symbol, g_cfg.signal_tf, 0);
     if(lastBar == curBar) return;
     lastBar = curBar;
 
@@ -619,7 +636,7 @@ void CheckForEntrySignals()
     if(g_cfg.use_ema_filter)
     {
         double ema   = GetEMA(1);
-        double price = iClose(_Symbol, InpSignalTF, 1);
+        double price = iClose(_Symbol, g_cfg.signal_tf, 1);
         if(ema < 0) return;
         if(buySignal  && price < ema)
         {
@@ -677,7 +694,7 @@ void CheckForHiddenDivergence()
     if(IsNewsTimeRestricted())  { if(InpVerboseLogs) Print("Entry blocked: news filter."); return; }
 
     double ema    = GetEMA(1);  if(ema < 0) return;
-    double price1 = iClose(_Symbol, InpSignalTF, 1);
+    double price1 = iClose(_Symbol, g_cfg.signal_tf, 1);
     double rsi1   = GetRSI(1);  if(rsi1 < 0) return;
 
     bool uptrend   = (price1 > ema);
@@ -693,7 +710,7 @@ void CheckForHiddenDivergence()
             if(InpVerboseLogs) Print("[DIV] No swing low found in lookback");
             return;
         }
-        double refClose = iClose(_Symbol, InpSignalTF, refBar);
+        double refClose = iClose(_Symbol, g_cfg.signal_tf, refBar);
         double refRSI   = GetRSI(refBar);
         if(refRSI < 0) return;
 
@@ -725,7 +742,7 @@ void CheckForHiddenDivergence()
             if(InpVerboseLogs) Print("[DIV] No swing high found in lookback");
             return;
         }
-        double refClose = iClose(_Symbol, InpSignalTF, refBar);
+        double refClose = iClose(_Symbol, g_cfg.signal_tf, refBar);
         double refRSI   = GetRSI(refBar);
         if(refRSI < 0) return;
 
@@ -788,9 +805,10 @@ void UpdateBreakoutRange()
     // Accumulate H/L during range window
     if(now >= rangeStart && now < rangeEnd)
     {
-        double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-        if(bid > g_brk_high) g_brk_high = bid;
-        if(bid < g_brk_low || g_brk_low == DBL_MAX) g_brk_low = bid;
+        double barHigh = iHigh(_Symbol, g_cfg.signal_tf, 0);
+        double barLow  = iLow (_Symbol, g_cfg.signal_tf, 0);
+        if(barHigh > g_brk_high) g_brk_high = barHigh;
+        if(barLow  < g_brk_low || g_brk_low == DBL_MAX) g_brk_low = barLow;
     }
     else if(now >= rangeEnd && !g_brk_range_built && g_brk_high > 0 && g_brk_low < DBL_MAX)
     {
@@ -875,7 +893,7 @@ void CheckEMACrossADX()
     double trendEMA = GetTrendEMA(1);
     if(trendEMA < 0) return;
 
-    double price1 = iClose(_Symbol, InpSignalTF, 1);
+    double price1 = iClose(_Symbol, g_cfg.signal_tf, 1);
 
     bool bullCross = (fast2 <= slow2 && fast1 > slow1);
     bool bearCross = (fast2 >= slow2 && fast1 < slow1);
@@ -899,7 +917,7 @@ void CheckEMACrossADX()
         int swLow = FindSwingLow(InpDivLookback, 2);
         if(swLow > 0)
         {
-            double swLowPrice = iClose(_Symbol, InpSignalTF, swLow);
+            double swLowPrice = iClose(_Symbol, g_cfg.signal_tf, swLow);
             if(ask - swLowPrice > 0) slDist = ask - swLowPrice;
         }
         double sl = ask - slDist;
@@ -925,7 +943,7 @@ void CheckEMACrossADX()
         int swHigh = FindSwingHigh(InpDivLookback, 2);
         if(swHigh > 0)
         {
-            double swHighPrice = iClose(_Symbol, InpSignalTF, swHigh);
+            double swHighPrice = iClose(_Symbol, g_cfg.signal_tf, swHigh);
             if(swHighPrice - bid > 0) slDist = swHighPrice - bid;
         }
         double sl = bid + slDist;
@@ -1102,7 +1120,7 @@ void ManageSessionEnd()
     if(wasInSession && !isInSession)
     {
         for(int i = PositionsTotal() - 1; i >= 0; i--)
-            if(posInfo.SelectByIndex(i) && posInfo.Magic() == InpMagicNumber)
+            if(posInfo.SelectByIndex(i) && IsManagedMagic(posInfo.Magic()) && posInfo.Symbol() == _Symbol)
             {
                 Print("Session ended. Closing position #", posInfo.Ticket());
                 trade.PositionClose(posInfo.Ticket());
@@ -1148,7 +1166,7 @@ void ManageNewsClose()
     if(now < preStart || now >= newsTime) return;
 
     for(int i = PositionsTotal() - 1; i >= 0; i--)
-        if(posInfo.SelectByIndex(i) && posInfo.Magic() == InpMagicNumber)
+        if(posInfo.SelectByIndex(i) && IsManagedMagic(posInfo.Magic()) && posInfo.Symbol() == _Symbol)
         {
             Print("Pre-news: closing position #", posInfo.Ticket());
             trade.PositionClose(posInfo.Ticket());

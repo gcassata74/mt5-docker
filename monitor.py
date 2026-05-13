@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RSI Engine v2.2 — Live Trade Monitor
+ScalpEngine v3 — Live Trade Monitor
 Reads today's MT5 log, detects open positions, fetches live prices, shows P&L.
 Run: python3 monitor.py
 """
@@ -26,6 +26,8 @@ TICKERS = {
     "USDJPY": "USDJPY=X",
     "USDCHF": "USDCHF=X",
     "AUDUSD": "AUDUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "EURJPY": "EURJPY=X",
 }
 
 PIP_EUR = {
@@ -33,15 +35,19 @@ PIP_EUR = {
     "USDJPY": 6.4,
     "USDCHF": 11.0,
     "AUDUSD": 6.4,
+    "GBPUSD": 10.0,
+    "EURJPY": 6.4,
 }
 
-JPY_PAIRS = {"USDJPY"}
+JPY_PAIRS = {"USDJPY", "EURJPY", "GBPJPY"}
 
 MAGIC_SYMBOLS = {
     "220001": "EURUSD",
     "220002": "AUDUSD",
     "220003": "USDCHF",
+    "220004": "GBPUSD",
     "220005": "USDJPY",
+    "220006": "EURJPY",
 }
 
 
@@ -53,15 +59,19 @@ def today_log():
             capture_output=True, timeout=10
         )
         if result.returncode != 0:
-            return []
+            return [], None
         raw = result.stdout
-    except Exception:
-        return []
+    except Exception as e:
+        return [], str(e)
     try:
         text = raw.decode("utf-16-le", errors="ignore")
     except Exception:
         text = raw.decode("utf-8", errors="ignore")
-    return text.splitlines()
+    lines = text.splitlines()
+    # strip BOM from first line
+    if lines and lines[0].startswith('﻿'):
+        lines[0] = lines[0][1:]
+    return lines, None
 
 
 def parse_trades(lines):
@@ -71,7 +81,7 @@ def parse_trades(lines):
 
     entry_re = re.compile(
         r'(\d{2}:\d{2}:\d{2}).*ScalpEngine_v3 \((\w+),M5\).*'
-        r'\[(?:ENTRY|DIV)\].*?(BUY|SELL) @ ([\d.]+).*SL: ([\d.]+).*TP: ([\d.]+)'
+        r'\[ENTRY\].*?(BUY|SELL) @ ([\d.]+).*SL: ([\d.]+).*TP: ([\d.]+)'
     )
     exit_re = re.compile(
         r'(\d{2}:\d{2}:\d{2}).*ScalpEngine_v3 \((\w+),M5\).*'
@@ -98,6 +108,34 @@ def parse_trades(lines):
             open_pos.pop(sym, None)
 
     return open_pos, closed
+
+
+def parse_activity(lines):
+    """Returns last 5 noteworthy log lines (blocked entries, regime changes, DIV checks)."""
+    activity = []
+    ts_re = re.compile(r'(\d{2}:\d{2}:\d{2})')
+    keywords = ("[CONFIG]", "Entry blocked", "[REGIME]", "[DIV]", "[ENTRY]", "[EXIT]")
+    for line in lines:
+        if any(k in line for k in keywords):
+            m = ts_re.search(line)
+            t = m.group(1) if m else "??:??:??"
+            # extract EA name and message
+            parts = line.split('\t')
+            msg = parts[-1][:80] if len(parts) >= 2 else line[:80]
+            ea_m = re.search(r'ScalpEngine_v3 \((\w+),M5\)', line)
+            sym = ea_m.group(1) if ea_m else "????"
+            activity.append(f"  {t}  {sym:<8} {msg}")
+    return activity[-6:]  # last 6
+
+
+def get_log_timestamp(lines):
+    """Returns timestamp of last log line."""
+    ts_re = re.compile(r'(\d{2}:\d{2}:\d{2})')
+    for line in reversed(lines):
+        m = ts_re.search(line)
+        if m:
+            return m.group(1)
+    return None
 
 
 def get_prices(symbols):
@@ -132,8 +170,16 @@ def run():
     while True:
         os.system("clear")
         now = datetime.now().strftime("%H:%M:%S")
-        lines = today_log()
+        lines, err = today_log()
+
+        if err or not lines:
+            print(f"\033[91m ScalpEngine v3 — Monitor  {now}\033[0m")
+            print(f"  ERROR reading log: {err or 'no lines'}")
+            time.sleep(30)
+            continue
+
         open_pos, closed = parse_trades(lines)
+        last_log_ts = get_log_timestamp(lines)
 
         # Closed P&L per symbol (sum over day)
         closed_by_sym = {}
@@ -162,8 +208,9 @@ def run():
         win_rate     = (wins / total_trades * 100) if total_trades else 0
 
         # ── Header ──────────────────────────────────────────────────────
-        print(f"\033[1m ScalpEngine v3 — Live Monitor  {now}\033[0m")
-        print("─" * 62)
+        log_age = f"  log UTC: {last_log_ts}" if last_log_ts else ""
+        print(f"\033[1m ScalpEngine v3 — Live Monitor  {now}{log_age}\033[0m")
+        print("─" * 70)
 
         # ── Open positions ───────────────────────────────────────────────
         if open_pos:
@@ -192,23 +239,30 @@ def run():
         else:
             print("  \033[90mNo closed trades yet\033[0m")
 
+        # ── Recent EA activity ───────────────────────────────────────────
+        print()
+        print(f"\033[1m RECENT ACTIVITY  ({len(lines)} log lines)\033[0m")
+        for a in parse_activity(lines):
+            print(a)
+
         # ── Summary ──────────────────────────────────────────────────────
         print()
-        print("─" * 62)
+        print("─" * 70)
         print(f"  Closed:   {color(total_closed, f'{total_closed:+.2f} EUR')}")
         print(f"  Floating: {color(total_float,  f'{total_float:+.2f} EUR')}")
         print(f"  \033[1mTODAY:    {color(total_day, f'{total_day:+.2f} EUR')}\033[0m")
-        # ── Auto-alert ───────────────────────────────────────────────
-        ALERT_THRESHOLD = -200  # EUR floating loss → trigger warning
+
+        # ── Auto-alert ───────────────────────────────────────────────────
+        ALERT_THRESHOLD = -200
         if total_float < ALERT_THRESHOLD:
             print()
             print(f"\033[91;1m ⚠  ALERT: floating loss {total_float:+.0f} EUR — CHECK POSITIONS MANUALLY\033[0m")
-            print("\a", end="", flush=True)  # terminal bell
+            print("\a", end="", flush=True)
 
-        print("─" * 62)
-        print(f"  \033[90mRefresh in 10min — Ctrl+C to quit\033[0m")
+        print("─" * 70)
+        print(f"  \033[90mRefresh in 60s — Ctrl+C to quit\033[0m")
 
-        time.sleep(600)
+        time.sleep(60)
 
 
 if __name__ == "__main__":
