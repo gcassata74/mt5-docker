@@ -408,8 +408,12 @@ void LoadConfig()
         else if(key == "InpMaxSameCurrDir")    { g_cfg.max_same_curr_dir  = (int)StringToInteger(val);        updated++; }
     }
     FileClose(handle);
-    if(InpVerboseLogs)
-        PrintFormat("[CONFIG] Loaded %s — %d params updated", filename, updated);
+    PrintFormat("[CONFIG] ✓ %s reloaded | lots=%.2f SL=%d TP=%d trail=%s trig=%d step=%d | DailyLimit=%.0f/%.0f",
+                filename,
+                g_cfg.lots, g_cfg.sl_points, g_cfg.tp_points,
+                g_cfg.use_trailing ? "ON" : "OFF",
+                g_cfg.trailing_trigger, g_cfg.trailing_step,
+                g_cfg.daily_profit_target, g_cfg.daily_loss_limit);
 }
 
 //+------------------------------------------------------------------+
