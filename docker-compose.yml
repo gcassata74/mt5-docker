@@ -17,6 +17,7 @@ services:
     volumes:
       - mt5_config:/config
       - ./mt5/home/presets:/home/presets
+      - "./mt5/home/presets:/config/.wine/drive_c/users/root/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Files/presets"
       - "./mt5/experts:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Downloads"
       - "./mt5/indicators:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Downloads"
       - "./mt5/logs:/config/.wine/drive_c/Program Files/MetaTrader 5/logs"

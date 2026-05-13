@@ -160,6 +160,27 @@ bool     g_brk_sold        = false;
 datetime g_brk_day         = 0;
 
 //+------------------------------------------------------------------+
+//| Hot-reload runtime config (re-read from .set file every new bar)  |
+//+------------------------------------------------------------------+
+struct RuntimeConfig {
+    double lots;
+    int    sl_points;
+    int    tp_points;
+    bool   use_trailing;
+    int    trailing_trigger;
+    int    trailing_step;
+    bool   enable_daily_limits;
+    double daily_profit_target;
+    double daily_loss_limit;
+    int    max_spread;
+    double adx_threshold;
+    bool   use_ema_filter;
+    bool   use_correl_filter;
+    int    max_same_curr_dir;
+};
+RuntimeConfig g_cfg;
+
+//+------------------------------------------------------------------+
 //| Indicator helpers (read on InpSignalTF)                           |
 //+------------------------------------------------------------------+
 double GetRSI(int shift)
@@ -232,7 +253,7 @@ bool IsCorrelated(string currency, int newDir)
         if(q == currency) dir = (posInfo.PositionType() == POSITION_TYPE_BUY) ? -1 :  1;
         if(dir == newDir) count++;
     }
-    if(count >= InpMaxSameCurrDir)
+    if(count >= g_cfg.max_same_curr_dir)
     {
         if(InpVerboseLogs)
             PrintFormat("Entry blocked: %s correlation (%d positions already %s %s)",
@@ -244,7 +265,7 @@ bool IsCorrelated(string currency, int newDir)
 
 bool IsEntryCurrencyBlocked(bool isBuy)
 {
-    if(!InpUseCorrelFilter) return false;
+    if(!g_cfg.use_correl_filter) return false;
     string base  = StringSubstr(_Symbol, 0, 3);
     string quote = StringSubstr(_Symbol, 3, 3);
     int baseDir  = isBuy ? 1 : -1;
@@ -326,10 +347,79 @@ int FindSwingHigh(int startBar, int endBar)
 }
 
 //+------------------------------------------------------------------+
+//| InitConfig: seed g_cfg from input defaults                        |
+//+------------------------------------------------------------------+
+void InitConfig()
+{
+    g_cfg.lots               = InpLots;
+    g_cfg.sl_points          = InpStopLossPoints;
+    g_cfg.tp_points          = InpTakeProfitPoints;
+    g_cfg.use_trailing       = InpUseTrailing;
+    g_cfg.trailing_trigger   = InpTrailingTrigger;
+    g_cfg.trailing_step      = InpTrailingStep;
+    g_cfg.enable_daily_limits = EnableDailyLimits;
+    g_cfg.daily_profit_target = DailyProfitTarget;
+    g_cfg.daily_loss_limit   = DailyLossLimit;
+    g_cfg.max_spread         = InpMaxSpreadPoints;
+    g_cfg.adx_threshold      = InpADX_Threshold;
+    g_cfg.use_ema_filter     = InpUseEMAFilter;
+    g_cfg.use_correl_filter  = InpUseCorrelFilter;
+    g_cfg.max_same_curr_dir  = InpMaxSameCurrDir;
+}
+
+//+------------------------------------------------------------------+
+//| LoadConfig: read .set file and update g_cfg                       |
+//+------------------------------------------------------------------+
+void LoadConfig()
+{
+    string filename = "presets\\" + _Symbol + "_M5.set";
+    int handle = FileOpen(filename, FILE_READ|FILE_TXT|FILE_ANSI);
+    if(handle == INVALID_HANDLE)
+    {
+        if(InpVerboseLogs)
+            PrintFormat("[CONFIG] Cannot read %s — using input defaults", filename);
+        return;
+    }
+    int updated = 0;
+    while(!FileIsEnding(handle))
+    {
+        string line = FileReadString(handle);
+        StringTrimRight(line);
+        if(StringLen(line) == 0 || StringGetCharacter(line, 0) == ';') continue;
+        int eq = StringFind(line, "=");
+        if(eq < 0) continue;
+        string key = StringSubstr(line, 0, eq);
+        string val = StringSubstr(line, eq + 1);
+        StringTrimRight(val);
+
+        if(key == "InpLots")              { g_cfg.lots               = StringToDouble(val);              updated++; }
+        else if(key == "InpStopLossPoints")    { g_cfg.sl_points          = (int)StringToInteger(val);        updated++; }
+        else if(key == "InpTakeProfitPoints")  { g_cfg.tp_points          = (int)StringToInteger(val);        updated++; }
+        else if(key == "InpUseTrailing")       { g_cfg.use_trailing       = (val == "true");                  updated++; }
+        else if(key == "InpTrailingTrigger")   { g_cfg.trailing_trigger   = (int)StringToInteger(val);        updated++; }
+        else if(key == "InpTrailingStep")      { g_cfg.trailing_step      = (int)StringToInteger(val);        updated++; }
+        else if(key == "EnableDailyLimits")    { g_cfg.enable_daily_limits = (val == "true");                 updated++; }
+        else if(key == "DailyProfitTarget")    { g_cfg.daily_profit_target = StringToDouble(val);             updated++; }
+        else if(key == "DailyLossLimit")       { g_cfg.daily_loss_limit   = StringToDouble(val);              updated++; }
+        else if(key == "InpMaxSpreadPoints")   { g_cfg.max_spread         = (int)StringToInteger(val);        updated++; }
+        else if(key == "InpADX_Threshold")     { g_cfg.adx_threshold      = StringToDouble(val);              updated++; }
+        else if(key == "InpUseEMAFilter")      { g_cfg.use_ema_filter     = (val == "true");                  updated++; }
+        else if(key == "InpUseCorrelFilter")   { g_cfg.use_correl_filter  = (val == "true");                  updated++; }
+        else if(key == "InpMaxSameCurrDir")    { g_cfg.max_same_curr_dir  = (int)StringToInteger(val);        updated++; }
+    }
+    FileClose(handle);
+    if(InpVerboseLogs)
+        PrintFormat("[CONFIG] Loaded %s — %d params updated", filename, updated);
+}
+
+//+------------------------------------------------------------------+
 //| OnInit                                                             |
 //+------------------------------------------------------------------+
 int OnInit()
 {
+    InitConfig();
+    LoadConfig();
+
     trade.SetExpertMagicNumber(InpMagicNumber);
     trade.SetDeviationInPoints(10);
     trade.SetTypeFillingBySymbol(_Symbol);
@@ -362,7 +452,7 @@ int OnInit()
                 EnumToString(InpSignalTF),
                 InpMagicNumber,
                 InpMultiPairMode ? "ON" : "OFF",
-                InpStopLossPoints, InpTakeProfitPoints);
+                g_cfg.sl_points, g_cfg.tp_points);
     return INIT_SUCCEEDED;
 }
 
@@ -426,12 +516,15 @@ void OnTick()
     if(lastBar == curBar) return;
     lastBar = curBar;
 
+    // Hot-reload parameters from .set file
+    LoadConfig();
+
     // Spread check
     double spread = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
-    if(spread > InpMaxSpreadPoints)
+    if(spread > g_cfg.max_spread)
     {
         if(InpVerboseLogs)
-            PrintFormat("Entry blocked: spread %.1f > %d pts", spread, InpMaxSpreadPoints);
+            PrintFormat("Entry blocked: spread %.1f > %d pts", spread, g_cfg.max_spread);
         return;
     }
 
@@ -459,15 +552,15 @@ void RouteByRegime()
     {
         double adx = GetADX(1);
         if(adx < 0) return;
-        int regime = (adx >= InpADX_Threshold) ? 1 : 0;
+        int regime = (adx >= g_cfg.adx_threshold) ? 1 : 0;
         if(regime != g_last_regime)
         {
             if(regime == 1)
                 PrintFormat("[REGIME] Switched to TRENDING (ADX=%.1f >= %.0f) — hidden divergence mode",
-                            adx, InpADX_Threshold);
+                            adx, g_cfg.adx_threshold);
             else
                 PrintFormat("[REGIME] Switched to RANGING (ADX=%.1f < %.0f) — mean reversion mode",
-                            adx, InpADX_Threshold);
+                            adx, g_cfg.adx_threshold);
             g_last_regime = regime;
         }
         if(regime == 1)
@@ -512,7 +605,7 @@ void CheckForEntrySignals()
 
     if(!buySignal && !sellSignal) return;
 
-    if(InpUseEMAFilter)
+    if(g_cfg.use_ema_filter)
     {
         double ema   = GetEMA(1);
         double price = iClose(_Symbol, InpSignalTF, 1);
@@ -534,14 +627,14 @@ void CheckForEntrySignals()
 
     if(IsEntryCurrencyBlocked(buySignal)) return;
 
-    double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+    double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
     if(lots <= 0) return;
 
     if(buySignal)
     {
         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        double sl  = (InpStopLossPoints   > 0) ? ask - InpStopLossPoints   * _Point : 0;
-        double tp  = (InpTakeProfitPoints > 0) ? ask + InpTakeProfitPoints * _Point : 0;
+        double sl  = (g_cfg.sl_points > 0) ? ask - g_cfg.sl_points * _Point : 0;
+        double tp  = (g_cfg.tp_points > 0) ? ask + g_cfg.tp_points * _Point : 0;
         PrintFormat("[ENTRY] BUY @ %.5f | RSI: %.1f→%.1f | SL: %.5f | TP: %.5f | lots: %.2f",
                     ask, rsi2, rsi1, sl, tp, lots);
         if(!trade.Buy(lots, _Symbol, ask, sl, tp, "SE3_MR_Buy"))
@@ -551,8 +644,8 @@ void CheckForEntrySignals()
     else
     {
         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-        double sl  = (InpStopLossPoints   > 0) ? bid + InpStopLossPoints   * _Point : 0;
-        double tp  = (InpTakeProfitPoints > 0) ? bid - InpTakeProfitPoints * _Point : 0;
+        double sl  = (g_cfg.sl_points > 0) ? bid + g_cfg.sl_points * _Point : 0;
+        double tp  = (g_cfg.tp_points > 0) ? bid - g_cfg.tp_points * _Point : 0;
         PrintFormat("[ENTRY] SELL @ %.5f | RSI: %.1f→%.1f | SL: %.5f | TP: %.5f | lots: %.2f",
                     bid, rsi2, rsi1, sl, tp, lots);
         if(!trade.Sell(lots, _Symbol, bid, sl, tp, "SE3_MR_Sell"))
@@ -597,11 +690,11 @@ void CheckForHiddenDivergence()
         if(price1 > refClose && rsi1 < refRSI)
         {
             if(IsEntryCurrencyBlocked(true)) return;
-            double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+            double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
             if(lots <= 0) return;
             double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-            double sl  = ask - InpStopLossPoints  * _Point;
-            double tp  = (InpTakeProfitPoints > 0) ? ask + InpTakeProfitPoints * _Point : 0;
+            double sl  = ask - g_cfg.sl_points * _Point;
+            double tp  = (g_cfg.tp_points > 0) ? ask + g_cfg.tp_points * _Point : 0;
             PrintFormat("[ENTRY] [DIV] HIDDEN BULL BUY @ %.5f | RSI: %.1f < ref %.1f (bar %d) | price: %.5f > ref %.5f | SL: %.5f | TP: %.5f",
                         ask, rsi1, refRSI, refBar, price1, refClose, sl, tp);
             if(!trade.Buy(lots, _Symbol, ask, sl, tp, "SE3_Div_Buy"))
@@ -629,11 +722,11 @@ void CheckForHiddenDivergence()
         if(price1 < refClose && rsi1 > refRSI)
         {
             if(IsEntryCurrencyBlocked(false)) return;
-            double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+            double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
             if(lots <= 0) return;
             double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-            double sl  = bid + InpStopLossPoints  * _Point;
-            double tp  = (InpTakeProfitPoints > 0) ? bid - InpTakeProfitPoints * _Point : 0;
+            double sl  = bid + g_cfg.sl_points * _Point;
+            double tp  = (g_cfg.tp_points > 0) ? bid - g_cfg.tp_points * _Point : 0;
             PrintFormat("[ENTRY] [DIV] HIDDEN BEAR SELL @ %.5f | RSI: %.1f > ref %.1f (bar %d) | price: %.5f < ref %.5f | SL: %.5f | TP: %.5f",
                         bid, rsi1, refRSI, refBar, price1, refClose, sl, tp);
             if(!trade.Sell(lots, _Symbol, bid, sl, tp, "SE3_Div_Sell"))
@@ -717,7 +810,7 @@ void CheckSessionBreakout()
     if(!g_brk_bought && !insideRange && ask > g_brk_high)
     {
         if(IsEntryCurrencyBlocked(true)) return;
-        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
         if(lots <= 0) return;
         double sl = ask - rangeSize;
         double tp = ask + 2.0 * rangeSize;
@@ -732,7 +825,7 @@ void CheckSessionBreakout()
     else if(!g_brk_sold && !insideRange && bid < g_brk_low)
     {
         if(IsEntryCurrencyBlocked(false)) return;
-        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
         if(lots <= 0) return;
         double sl = bid + rangeSize;
         double tp = bid - 2.0 * rangeSize;
@@ -776,10 +869,10 @@ void CheckEMACrossADX()
     bool bullCross = (fast2 <= slow2 && fast1 > slow1);
     bool bearCross = (fast2 >= slow2 && fast1 < slow1);
 
-    if(adx < InpADX_Threshold)
+    if(adx < g_cfg.adx_threshold)
     {
         if(InpVerboseLogs)
-            PrintFormat("[EMACROSS] ADX=%.1f below threshold %.0f — no entry", adx, InpADX_Threshold);
+            PrintFormat("[EMACROSS] ADX=%.1f below threshold %.0f — no entry", adx, g_cfg.adx_threshold);
         return;
     }
 
@@ -787,11 +880,11 @@ void CheckEMACrossADX()
     if(bullCross && g_ema_cross_dir != 1 && price1 > trendEMA)
     {
         if(IsEntryCurrencyBlocked(true)) return;
-        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
         if(lots <= 0) return;
         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
-        double slDist = InpStopLossPoints * _Point;
+        double slDist = g_cfg.sl_points * _Point;
         int swLow = FindSwingLow(InpDivLookback, 2);
         if(swLow > 0)
         {
@@ -813,11 +906,11 @@ void CheckEMACrossADX()
     else if(bearCross && g_ema_cross_dir != -1 && price1 < trendEMA)
     {
         if(IsEntryCurrencyBlocked(false)) return;
-        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(InpLots);
+        double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
         if(lots <= 0) return;
         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-        double slDist = InpStopLossPoints * _Point;
+        double slDist = g_cfg.sl_points * _Point;
         int swHigh = FindSwingHigh(InpDivLookback, 2);
         if(swHigh > 0)
         {
@@ -855,7 +948,7 @@ bool IsPositionOpen()
 //+------------------------------------------------------------------+
 void ManageTrailingStop()
 {
-    if(!InpUseTrailing) return;
+    if(!g_cfg.use_trailing) return;
 
     for(int i = PositionsTotal() - 1; i >= 0; i--)
     {
@@ -868,8 +961,8 @@ void ManageTrailingStop()
         double tp      = posInfo.TakeProfit();
         double bid     = SymbolInfoDouble(_Symbol, SYMBOL_BID);
         double ask     = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        double trigger = InpTrailingTrigger * _Point;
-        double step    = InpTrailingStep    * _Point;
+        double trigger = g_cfg.trailing_trigger * _Point;
+        double step    = g_cfg.trailing_step    * _Point;
 
         if(posInfo.PositionType() == POSITION_TYPE_BUY)
         {
@@ -907,7 +1000,7 @@ void ManageTrailingStop()
 //+------------------------------------------------------------------+
 bool IsDailyLimitReached()
 {
-    if(!EnableDailyLimits) return false;
+    if(!g_cfg.enable_daily_limits) return false;
 
     MqlDateTime dt;
     TimeToStruct(TimeCurrent(), dt);
@@ -930,13 +1023,13 @@ bool IsDailyLimitReached()
         if(posInfo.SelectByIndex(i) && IsManagedMagic(posInfo.Magic()))
             profit += posInfo.Profit();
 
-    if(profit >= DailyProfitTarget)
+    if(profit >= g_cfg.daily_profit_target)
     {
         PrintFormat("[LIMIT] Daily profit target reached (%.2f %s overall). All pairs stopped.",
                     profit, AccountInfoString(ACCOUNT_CURRENCY));
         g_daily_limit_reached = true; return true;
     }
-    if(profit <= -DailyLossLimit)
+    if(profit <= -g_cfg.daily_loss_limit)
     {
         PrintFormat("[LIMIT] Daily loss limit reached (%.2f %s overall). All pairs stopped.",
                     profit, AccountInfoString(ACCOUNT_CURRENCY));
@@ -1058,14 +1151,14 @@ void ManageNewsClose()
 //+------------------------------------------------------------------+
 double CalculateLotSize()
 {
-    if(InpStopLossPoints <= 0) return 0;
+    if(g_cfg.sl_points <= 0) return 0;
     double equity   = account.Equity();
     double riskAmt  = equity * (InpRiskPercent / 100.0);
     double tickVal  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
     double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
     if(tickSize == 0) return 0;
     double valPerPt = tickVal / tickSize;
-    double slMoney  = InpStopLossPoints * valPerPt;
+    double slMoney  = g_cfg.sl_points * valPerPt;
     if(slMoney <= 0) return 0;
     return NormalizeVolume(riskAmt / slMoney);
 }
