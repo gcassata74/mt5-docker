@@ -157,6 +157,18 @@ int g_last_regime = -1;  // 0=ranging, 1=trending
 //--- EMA cross state (EMA_CROSS_ADX)
 int g_ema_cross_dir = 0;  // +1 = bullish cross seen, -1 = bearish cross seen
 
+//--- Re-entry cooldown after consecutive SL hits
+#define  MAX_CONSEC_SL    2
+#define  COOLDOWN_BARS    10
+#define  DIV_RSI_MIN_DIFF 15.0   // minimum RSI divergence for DIV entries
+
+//--- Last known open direction for reliable cooldown tracking
+int      g_last_open_dir = 0;    // +1=BUY, -1=SELL
+int      g_consec_sl_buy  = 0;
+int      g_consec_sl_sell = 0;
+datetime g_cooldown_buy   = 0;
+datetime g_cooldown_sell  = 0;
+
 //--- Session breakout globals
 double   g_brk_high        = 0.0;
 double   g_brk_low         = 0.0;
@@ -185,6 +197,13 @@ struct RuntimeConfig {
     int    max_same_curr_dir;
     ulong           magic_number;
     ENUM_TIMEFRAMES signal_tf;
+    int             div_rsi_pullback;
+    int             div_rsi_rally;
+    int             rsi_period;
+    int             rsi_overbought;
+    int             rsi_oversold;
+    bool            enable_time_filter;
+    string          hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat, hours_sun;
 };
 RuntimeConfig g_cfg;
 
@@ -377,6 +396,19 @@ void InitConfig()
     g_cfg.max_same_curr_dir  = InpMaxSameCurrDir;
     g_cfg.magic_number       = InpMagicNumber;
     g_cfg.signal_tf          = InpSignalTF;
+    g_cfg.div_rsi_pullback   = InpDivRSI_Pullback;
+    g_cfg.div_rsi_rally      = InpDivRSI_Rally;
+    g_cfg.rsi_period         = InpRSI_Period;
+    g_cfg.rsi_overbought     = InpRSI_Overbought;
+    g_cfg.rsi_oversold       = InpRSI_Oversold;
+    g_cfg.enable_time_filter = EnableTimeFilter;
+    g_cfg.hours_mon          = MondayHours;
+    g_cfg.hours_tue          = TuesdayHours;
+    g_cfg.hours_wed          = WednesdayHours;
+    g_cfg.hours_thu          = ThursdayHours;
+    g_cfg.hours_fri          = FridayHours;
+    g_cfg.hours_sat          = SaturdayHours;
+    g_cfg.hours_sun          = SundayHours;
 }
 
 //+------------------------------------------------------------------+
@@ -417,8 +449,29 @@ void LoadConfig()
         else if(key == "InpMaxSameCurrDir")     g_cfg.max_same_curr_dir   = (int)StringToInteger(val);
         else if(key == "InpMagicNumber")        g_cfg.magic_number        = (ulong)StringToInteger(val);
         else if(key == "InpSignalTF")           g_cfg.signal_tf           = (ENUM_TIMEFRAMES)(int)StringToInteger(val);
+        else if(key == "InpDivRSI_Pullback")    g_cfg.div_rsi_pullback    = (int)StringToInteger(val);
+        else if(key == "InpDivRSI_Rally")       g_cfg.div_rsi_rally       = (int)StringToInteger(val);
+        else if(key == "InpRSI_Period")         g_cfg.rsi_period          = (int)StringToInteger(val);
+        else if(key == "InpRSI_Overbought")     g_cfg.rsi_overbought      = (int)StringToInteger(val);
+        else if(key == "InpRSI_Oversold")       g_cfg.rsi_oversold        = (int)StringToInteger(val);
+        else if(key == "EnableTimeFilter")      g_cfg.enable_time_filter  = (val == "true");
+        else if(key == "MondayHours")           g_cfg.hours_mon           = val;
+        else if(key == "TuesdayHours")          g_cfg.hours_tue           = val;
+        else if(key == "WednesdayHours")        g_cfg.hours_wed           = val;
+        else if(key == "ThursdayHours")         g_cfg.hours_thu           = val;
+        else if(key == "FridayHours")           g_cfg.hours_fri           = val;
+        else if(key == "SaturdayHours")         g_cfg.hours_sat           = val;
+        else if(key == "SundayHours")           g_cfg.hours_sun           = val;
     }
     FileClose(handle);
+
+    // Recreate RSI handle if period changed
+    if(g_cfg.rsi_period != prev.rsi_period || g_cfg.signal_tf != prev.signal_tf)
+    {
+        IndicatorRelease(rsi_handle);
+        rsi_handle = iRSI(_Symbol, g_cfg.signal_tf, g_cfg.rsi_period, PRICE_CLOSE);
+        if(rsi_handle == INVALID_HANDLE) Print("[CONFIG] RSI handle recreation failed");
+    }
 
     bool changed = (g_cfg.lots              != prev.lots              ||
                     g_cfg.sl_points         != prev.sl_points         ||
@@ -515,6 +568,38 @@ void DetectAndLogExit()
                     deal.Type() == DEAL_TYPE_SELL ? "BUY closed" : "SELL closed",
                     closeDesc, extProfit, AccountInfoString(ACCOUNT_CURRENCY), deal.Price());
         LogTradePnl(extProfit);
+
+        bool was_sl  = (dealReason == DEAL_REASON_SL) && (extProfit < 0);
+        bool was_buy = (g_last_open_dir == 1);
+        int  period_secs = PeriodSeconds(g_cfg.signal_tf);
+        if(was_sl)
+        {
+            if(was_buy)
+            {
+                g_consec_sl_buy++;
+                if(g_consec_sl_buy >= MAX_CONSEC_SL)
+                {
+                    g_cooldown_buy = TimeCurrent() + COOLDOWN_BARS * period_secs;
+                    PrintFormat("[COOLDOWN] BUY blocked for %d bars after %d consec SL hits", COOLDOWN_BARS, g_consec_sl_buy);
+                    g_consec_sl_buy = 0;
+                }
+            }
+            else
+            {
+                g_consec_sl_sell++;
+                if(g_consec_sl_sell >= MAX_CONSEC_SL)
+                {
+                    g_cooldown_sell = TimeCurrent() + COOLDOWN_BARS * period_secs;
+                    PrintFormat("[COOLDOWN] SELL blocked for %d bars after %d consec SL hits", COOLDOWN_BARS, g_consec_sl_sell);
+                    g_consec_sl_sell = 0;
+                }
+            }
+        }
+        else
+        {
+            if(was_buy) g_consec_sl_buy  = 0;
+            else        g_consec_sl_sell = 0;
+        }
         break;
     }
 }
@@ -628,8 +713,8 @@ void CheckForEntrySignals()
     double rsi2 = GetRSI(2);
     if(rsi1 < 0 || rsi2 < 0) return;
 
-    bool buySignal  = (rsi2 < InpRSI_Oversold  && rsi1 >= InpRSI_Oversold);
-    bool sellSignal = (rsi2 > InpRSI_Overbought && rsi1 <= InpRSI_Overbought);
+    bool buySignal  = (rsi2 < g_cfg.rsi_oversold  && rsi1 >= g_cfg.rsi_oversold);
+    bool sellSignal = (rsi2 > g_cfg.rsi_overbought && rsi1 <= g_cfg.rsi_overbought);
 
     if(!buySignal && !sellSignal) return;
 
@@ -660,9 +745,11 @@ void CheckForEntrySignals()
 
     if(buySignal)
     {
+        if(TimeCurrent() < g_cooldown_buy) { PrintFormat("[COOLDOWN] BUY skipped (cooldown until %s)", TimeToString(g_cooldown_buy, TIME_SECONDS)); return; }
         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
         double sl  = (g_cfg.sl_points > 0) ? ask - g_cfg.sl_points * _Point : 0;
         double tp  = (g_cfg.tp_points > 0) ? ask + g_cfg.tp_points * _Point : 0;
+        g_last_open_dir = 1;
         PrintFormat("[ENTRY] BUY @ %.5f | RSI: %.1f→%.1f | SL: %.5f | TP: %.5f | lots: %.2f",
                     ask, rsi2, rsi1, sl, tp, lots);
         if(!trade.Buy(lots, _Symbol, ask, sl, tp, "SE3_MR_Buy"))
@@ -671,9 +758,11 @@ void CheckForEntrySignals()
     }
     else
     {
+        if(TimeCurrent() < g_cooldown_sell) { PrintFormat("[COOLDOWN] SELL skipped (cooldown until %s)", TimeToString(g_cooldown_sell, TIME_SECONDS)); return; }
         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
         double sl  = (g_cfg.sl_points > 0) ? bid + g_cfg.sl_points * _Point : 0;
         double tp  = (g_cfg.tp_points > 0) ? bid - g_cfg.tp_points * _Point : 0;
+        g_last_open_dir = -1;
         PrintFormat("[ENTRY] SELL @ %.5f | RSI: %.1f→%.1f | SL: %.5f | TP: %.5f | lots: %.2f",
                     bid, rsi2, rsi1, sl, tp, lots);
         if(!trade.Sell(lots, _Symbol, bid, sl, tp, "SE3_MR_Sell"))
@@ -701,7 +790,7 @@ void CheckForHiddenDivergence()
     bool downtrend = (price1 < ema);
     if(!uptrend && !downtrend) return;
 
-    if(uptrend && rsi1 < InpDivRSI_Pullback)
+    if(uptrend && rsi1 < g_cfg.div_rsi_pullback)
     {
         // Find swing low in lookback window for reference bar
         int refBar = FindSwingLow(InpDivLookback, 2);
@@ -714,26 +803,28 @@ void CheckForHiddenDivergence()
         double refRSI   = GetRSI(refBar);
         if(refRSI < 0) return;
 
-        // Hidden bullish: price higher low AND RSI lower low
-        if(price1 > refClose && rsi1 < refRSI)
+        // Hidden bullish: price higher low AND RSI lower low with minimum divergence
+        if(price1 > refClose && rsi1 < refRSI && (refRSI - rsi1) >= DIV_RSI_MIN_DIFF)
         {
+            if(TimeCurrent() < g_cooldown_buy) { PrintFormat("[COOLDOWN] [DIV] BUY skipped (cooldown until %s)", TimeToString(g_cooldown_buy, TIME_SECONDS)); return; }
             if(IsEntryCurrencyBlocked(true)) return;
             double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
             if(lots <= 0) return;
             double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
             double sl  = ask - g_cfg.sl_points * _Point;
             double tp  = (g_cfg.tp_points > 0) ? ask + g_cfg.tp_points * _Point : 0;
-            PrintFormat("[ENTRY] [DIV] HIDDEN BULL BUY @ %.5f | RSI: %.1f < ref %.1f (bar %d) | price: %.5f > ref %.5f | SL: %.5f | TP: %.5f",
-                        ask, rsi1, refRSI, refBar, price1, refClose, sl, tp);
+            g_last_open_dir = 1;
+            PrintFormat("[ENTRY] [DIV] HIDDEN BULL BUY @ %.5f | RSI: %.1f < ref %.1f (diff=%.1f, bar %d) | price: %.5f > ref %.5f | SL: %.5f | TP: %.5f",
+                        ask, rsi1, refRSI, refRSI-rsi1, refBar, price1, refClose, sl, tp);
             if(!trade.Buy(lots, _Symbol, ask, sl, tp, "SE3_Div_Buy"))
                 PrintFormat("[ENTRY] [DIV] BUY failed: %d %s",
                             trade.ResultRetcode(), trade.ResultRetcodeDescription());
         }
         else if(InpVerboseLogs)
-            PrintFormat("[DIV] No hidden bull | RSI: %.1f ref: %.1f | price: %.5f ref: %.5f",
-                        rsi1, refRSI, price1, refClose);
+            PrintFormat("[DIV] No hidden bull | RSI: %.1f ref: %.1f (diff=%.1f) | price: %.5f ref: %.5f",
+                        rsi1, refRSI, refRSI-rsi1, price1, refClose);
     }
-    else if(downtrend && rsi1 > InpDivRSI_Rally)
+    else if(downtrend && rsi1 > g_cfg.div_rsi_rally)
     {
         // Find swing high in lookback window for reference bar
         int refBar = FindSwingHigh(InpDivLookback, 2);
@@ -746,17 +837,19 @@ void CheckForHiddenDivergence()
         double refRSI   = GetRSI(refBar);
         if(refRSI < 0) return;
 
-        // Hidden bearish: price lower high AND RSI higher high
-        if(price1 < refClose && rsi1 > refRSI)
+        // Hidden bearish: price lower high AND RSI higher high with minimum divergence
+        if(price1 < refClose && rsi1 > refRSI && (rsi1 - refRSI) >= DIV_RSI_MIN_DIFF)
         {
+            if(TimeCurrent() < g_cooldown_sell) { PrintFormat("[COOLDOWN] [DIV] SELL skipped (cooldown until %s)", TimeToString(g_cooldown_sell, TIME_SECONDS)); return; }
             if(IsEntryCurrencyBlocked(false)) return;
             double lots = InpUseRiskManagement ? CalculateLotSize() : NormalizeVolume(g_cfg.lots);
             if(lots <= 0) return;
             double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
             double sl  = bid + g_cfg.sl_points * _Point;
             double tp  = (g_cfg.tp_points > 0) ? bid - g_cfg.tp_points * _Point : 0;
-            PrintFormat("[ENTRY] [DIV] HIDDEN BEAR SELL @ %.5f | RSI: %.1f > ref %.1f (bar %d) | price: %.5f < ref %.5f | SL: %.5f | TP: %.5f",
-                        bid, rsi1, refRSI, refBar, price1, refClose, sl, tp);
+            g_last_open_dir = -1;
+            PrintFormat("[ENTRY] [DIV] HIDDEN BEAR SELL @ %.5f | RSI: %.1f > ref %.1f (diff=%.1f, bar %d) | price: %.5f < ref %.5f | SL: %.5f | TP: %.5f",
+                        bid, rsi1, refRSI, rsi1-refRSI, refBar, price1, refClose, sl, tp);
             if(!trade.Sell(lots, _Symbol, bid, sl, tp, "SE3_Div_Sell"))
                 PrintFormat("[ENTRY] [DIV] SELL failed: %d %s",
                             trade.ResultRetcode(), trade.ResultRetcodeDescription());
@@ -1072,22 +1165,22 @@ bool IsDailyLimitReached()
 //+------------------------------------------------------------------+
 bool IsWithinTradingHours()
 {
-    if(!EnableTimeFilter) return true;
+    if(!g_cfg.enable_time_filter) return true;
 
     MqlDateTime t;
-    TimeToStruct(TimeCurrent(), t);
+    TimeToStruct(TimeGMT(), t);
     int nowMin = t.hour * 60 + t.min;
 
     string hours = "";
     switch(t.day_of_week)
     {
-        case 0: hours = SundayHours;    break;
-        case 1: hours = MondayHours;    break;
-        case 2: hours = TuesdayHours;   break;
-        case 3: hours = WednesdayHours; break;
-        case 4: hours = ThursdayHours;  break;
-        case 5: hours = FridayHours;    break;
-        case 6: hours = SaturdayHours;  break;
+        case 0: hours = g_cfg.hours_sun; break;
+        case 1: hours = g_cfg.hours_mon; break;
+        case 2: hours = g_cfg.hours_tue; break;
+        case 3: hours = g_cfg.hours_wed; break;
+        case 4: hours = g_cfg.hours_thu; break;
+        case 5: hours = g_cfg.hours_fri; break;
+        case 6: hours = g_cfg.hours_sat; break;
     }
 
     string sessions[];

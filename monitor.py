@@ -81,21 +81,21 @@ def parse_trades(lines):
 
     entry_re = re.compile(
         r'(\d{2}:\d{2}:\d{2}).*ScalpEngine_v3 \((\w+),M5\).*'
-        r'\[ENTRY\].*?(BUY|SELL) @ ([\d.]+).*SL: ([\d.]+).*TP: ([\d.]+)'
+        r'\[ENTRY\].*?(BUY|SELL) @ ([\d.]+).*SL: ([\d.]+).*TP: ([\d.]+).*lots: ([\d.]+)'
     )
     exit_re = re.compile(
         r'(\d{2}:\d{2}:\d{2}).*ScalpEngine_v3 \((\w+),M5\).*'
-        r'\[EXIT\].*profit: ([+-]?[\d.]+) EUR'
+        r'\[EXIT\].*profit: ([+-]?[\d.]+)'
     )
     exit_reason_re = re.compile(r'(TAKE PROFIT|STOP LOSS|closed externally|session)')
 
     for line in lines:
         m = entry_re.search(line)
         if m:
-            t, sym, direction, entry, sl, tp = m.groups()
+            t, sym, direction, entry, sl, tp, lots = m.groups()
             open_pos[sym] = {
                 "dir": direction, "entry": float(entry),
-                "sl": float(sl), "tp": float(tp), "time": t
+                "sl": float(sl), "tp": float(tp), "lots": float(lots), "time": t
             }
             continue
 
@@ -154,9 +154,9 @@ def get_prices(symbols):
     return prices
 
 
-def pip_value(sym, price_diff):
+def pip_value(sym, price_diff, lots=1.0):
     div = 0.01 if sym in JPY_PAIRS else 0.0001
-    return (price_diff / div) * PIP_EUR.get(sym, 10.0)
+    return (price_diff / div) * PIP_EUR.get(sym, 10.0) * lots
 
 
 def color(val, text=None):
@@ -199,7 +199,7 @@ def run():
             now_price = prices[sym]
             sign = 1 if pos["dir"] == "BUY" else -1
             diff = (now_price - pos["entry"]) * sign
-            floating[sym] = pip_value(sym, diff)
+            floating[sym] = pip_value(sym, diff, pos.get("lots", 1.0))
 
         total_float  = sum(floating.values())
         total_day    = total_closed + total_float
