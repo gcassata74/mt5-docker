@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sed -i \\\\ *)",
+      "Bash(python3 -)",
+      "Bash(iconv -f utf-16le -t utf-8)",
+      "Bash(git rm *)",
+      "Bash(python3 -c \"import json,sys; mounts=json.load\\(sys.stdin\\)[0]['Mounts']; [print\\(m['Type'], m.get\\('Source',''\\), '->', m['Destination']\\) for m in mounts]\")",
+      "Bash(python3 -c ' *)",
+      "Bash(awk '{ *)"
+    ],
+    "additionalDirectories": [
+      "/home/gcassata/gitrepos/mt5-docker/mt5/home/presets"
+    ]
+  }
+}

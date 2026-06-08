@@ -1,6 +1,6 @@
-# MT5 Docker + RSI Engine v2.2
+# MT5 Docker + ScalpEngine v3
 
-MetaTrader 5 running inside a Docker container (Wine + noVNC), with the **RSI Engine v2.2** Expert Advisor — a dual-mode scalping strategy for M5 forex pairs.
+MetaTrader 5 running inside a Docker container (Wine + noVNC), with the **ScalpEngine v3** Expert Advisor — a dual-mode scalping strategy for M5 forex pairs.
 
 ---
 
@@ -49,13 +49,13 @@ docker compose down
 | `./mt5/home/presets/` | `/home/presets/` | `.set` parameter files per symbol |
 | `./mt5/logs/` | MT5 Logs | Daily log files (`YYYYMMDD.log`) |
 
-**Compiling the EA:** open MetaEditor inside MT5 (Tools → MetaEditor), open `The_RSI_Engine_v2.2.mq5`, press **F7**. The `.ex5` binary is written automatically to the Experts folder.
+**Compiling the EA:** open MetaEditor inside MT5 (Tools → MetaEditor), open `ScalpEngine_v3.mq5`, press **F7**. The `.ex5` binary is written automatically to the Experts folder.
 
 ---
 
 ## Trading Strategy
 
-The RSI Engine v2.2 implements a **dual-mode scalping strategy** on M5 bars. On every new bar it first measures the market regime via ADX, then routes to the appropriate entry logic:
+ScalpEngine v3 implements a **dual-mode scalping strategy** on M5 bars. On every new bar it first measures the market regime via ADX, then routes to the appropriate entry logic:
 
 ```
 New bar
@@ -200,6 +200,8 @@ The EA tracks cumulative P&L per symbol per day and stops trading when limits ar
 | `DailyProfitTarget` | 300.0 EUR | Stop taking new trades once daily profit reaches this |
 | `DailyLossLimit` | 150.0 EUR | Stop taking new trades once daily loss reaches this |
 
+**Current demo profile (June 2026):** `EURUSD`, `USDJPY`, `EURJPY` run with `DailyProfitTarget=220.0` and `DailyLossLimit=80.0` in their `.set` files.
+
 #### Spread Filter
 New entries are blocked when the spread is too wide (slippage cost would erode the edge).
 
@@ -208,11 +210,11 @@ New entries are blocked when the spread is too wide (slippage cost would erode t
 | `InpMaxSpreadPoints` | 15 | ~1.5 pips max spread for entry |
 
 #### Time Filter
-Configurable trading sessions per day of week (server time). Default sessions avoid low-liquidity periods (Asia overnight, Friday close).
+Configurable trading sessions per day of week (server time). Active profile used in demo:
 
 ```
-Monday–Thursday:  09:00–12:00, 14:00–21:00
-Friday:           09:00–12:00, 14:00–20:00
+Monday–Thursday:  08:00–14:30, 15:30–18:30
+Friday:           08:00–14:30, 15:30–17:30
 Saturday/Sunday:  closed
 ```
 
@@ -259,7 +261,7 @@ A configurable time window around a fixed daily news event blocks both new entri
 
 ## Parameter Reference
 
-Full parameter list for `The_RSI_Engine_v2.2.mq5`:
+Full parameter list for `ScalpEngine_v3.mq5`:
 
 ### Trade Management
 
@@ -304,8 +306,8 @@ Full parameter list for `The_RSI_Engine_v2.2.mq5`:
 | Parameter | Default | Description |
 |---|---|---|
 | `EnableDailyLimits` | true | Enable daily stop rules |
-| `DailyProfitTarget` | 300.0 | Stop new entries when cumulative daily profit reaches this (EUR) |
-| `DailyLossLimit` | 150.0 | Stop new entries when cumulative daily loss reaches this (EUR) |
+| `DailyProfitTarget` | 300.0 | Stop new entries when cumulative daily profit reaches this (EUR); selected presets may override |
+| `DailyLossLimit` | 150.0 | Stop new entries when cumulative daily loss reaches this (EUR); selected presets may override |
 
 ---
 
@@ -318,7 +320,6 @@ Each symbol has a dedicated `.set` file in `mt5/home/presets/`. Magic numbers ar
 | EURUSD | `EURUSD_M5.set` | 220001 | Primary pair, 10 EUR/pip at 1 lot |
 | AUDUSD | `AUDUSD_M5.set` | 220002 | ~6.4 EUR/pip at 1 lot |
 | USDCHF | `USDCHF_M5.set` | 220003 | ~11 EUR/pip at 1 lot |
-| GBPUSD | `GBPUSD_M5.set` | 220004 | 10 EUR/pip at 1 lot |
 | USDJPY | `USDJPY_M5.set` | 220005 | ~6.4 EUR/pip at 1 lot |
 | EURJPY | `EURJPY_M5.set` | 220006 | |
 | USDCNH | `USDCNH_M5.set` | 220007 | Lower liquidity |

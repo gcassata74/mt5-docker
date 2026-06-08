@@ -720,8 +720,9 @@ void CheckForEntrySignals()
 
     if(g_cfg.use_ema_filter)
     {
-        double ema   = GetEMA(1);
-        double price = iClose(_Symbol, g_cfg.signal_tf, 1);
+        double ema      = GetEMA(1);
+        double trendEma = GetTrendEMA(1);
+        double price    = iClose(_Symbol, g_cfg.signal_tf, 1);
         if(ema < 0) return;
         if(buySignal  && price < ema)
         {
@@ -734,6 +735,21 @@ void CheckForEntrySignals()
             if(InpVerboseLogs)
                 PrintFormat("Entry blocked: SELL signal but price (%.5f) above EMA (%.5f)", price, ema);
             sellSignal = false;
+        }
+        if(trendEma > 0)
+        {
+            if(buySignal  && price < trendEma)
+            {
+                if(InpVerboseLogs)
+                    PrintFormat("Entry blocked: BUY signal but price (%.5f) below EMA200 (%.5f)", price, trendEma);
+                buySignal = false;
+            }
+            if(sellSignal && price > trendEma)
+            {
+                if(InpVerboseLogs)
+                    PrintFormat("Entry blocked: SELL signal but price (%.5f) above EMA200 (%.5f)", price, trendEma);
+                sellSignal = false;
+            }
         }
         if(!buySignal && !sellSignal) return;
     }
@@ -1184,7 +1200,7 @@ bool IsWithinTradingHours()
     }
 
     string sessions[];
-    int n = StringSplit(hours, ';', sessions);
+    int n = StringSplit(hours, ',', sessions);
     for(int i = 0; i < n; i++)
     {
         string times[];
