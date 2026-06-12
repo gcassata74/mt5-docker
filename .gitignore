@@ -1,3 +1,5 @@
 mt5/logs/
 mt5/experts/*.ex5
 mt5/indicators/*.ex5
+mt5/mt5setup.exe
+.claude/

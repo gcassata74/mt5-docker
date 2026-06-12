@@ -16,9 +16,9 @@ services:
       - VNC_COL_DEPTH=16
     volumes:
       - mt5_config:/config
-      - ./mt5/home/presets:/home/presets
-      - "./mt5/home/presets:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Files/presets"
-      - "./mt5/experts:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Downloads"
+      - ../scalp-engine/home/presets:/home/presets
+      - "../scalp-engine/home/presets:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Files/presets"
+      - "../scalp-engine/experts:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/Downloads"
       - "./mt5/indicators:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Indicators/Downloads"
       - "./mt5/logs:/config/.wine/drive_c/Program Files/MetaTrader 5/logs"
 
